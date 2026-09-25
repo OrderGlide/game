@@ -83,6 +83,15 @@ export const WAVES = {
 export const wallMax = (level: number) => 100 + 60 * level;
 export const TOWER = { range: 14.5, every: 1.2, damage: 14 };
 
+export type TowerKind = 'crossbow' | 'ice' | 'fire' | 'cannon';
+/** Special towers: damage is a multiple of the crossbow's; ice slows, fire burns, cannon hits an area. */
+export const TOWER_KINDS: Record<TowerKind, { every: number; damage: number; slow?: number; burn?: number; splash?: number }> = {
+  crossbow: { every: 1.2, damage: 1 },
+  ice: { every: 1.0, damage: 0.4, slow: 2 },
+  fire: { every: 0.9, damage: 0.5, burn: 3 },
+  cannon: { every: 2.6, damage: 3.5, splash: 2.4 },
+};
+
 // ---------- worlds ----------
 
 export type WorldId = 'winter' | 'desert' | 'jungle' | 'swamp' | 'volcano' | 'crystal';
@@ -144,8 +153,8 @@ export function worldAt(n: number): WorldInfo {
 
 // ---------- build pads (cash, per world) ----------
 
-export type PadId = 'tower1' | 'tower2' | 'tower3' | 'tower4' | 'lumber' | 'miner' | 'wall' | 'portal';
-export type PadIcon = 'tower' | 'lumber' | 'miner' | 'wall' | 'portal';
+export type PadId = 'tower1' | 'tower2' | 'tower3' | 'tower4' | 'lumber' | 'miner' | 'wall' | 'portal' | 'tent' | 'ice' | 'fire' | 'cannon';
+export type PadIcon = 'tower' | 'lumber' | 'miner' | 'wall' | 'portal' | 'tent' | 'ice' | 'fire' | 'cannon';
 
 export interface PadDef {
   id: PadId; x: number; z: number; icon: PadIcon;
@@ -165,8 +174,18 @@ export const PADS: PadDef[] = [
   { id: 'tower3', x: 3.4, z: -6.4, icon: 'tower', requires: ['tower2'], max: 1, cost: () => 400 },
   { id: 'tower4', x: 5.6, z: 6.6, icon: 'tower', requires: ['tower3'], max: 1, cost: () => 900 },
   { id: 'portal', x: -1.6, z: 1.4, icon: 'portal', requires: ['boss'], max: 1, cost: () => 0 },
+  { id: 'tent', x: -6.3, z: 3.3, icon: 'tent', requires: ['tower2'], max: 3, cost: (l) => Math.round(250 * 2.2 ** l) },
+  { id: 'ice', x: 11.3, z: 9.6, icon: 'ice', requires: ['tower2'], max: 1, cost: () => 600 },
+  { id: 'fire', x: 6.3, z: -2.7, icon: 'fire', requires: ['tower4'], max: 1, cost: () => 1500 },
+  { id: 'cannon', x: 11.3, z: -9.6, icon: 'cannon', requires: ['tower3'], max: 1, cost: () => 2500 },
 ];
-export const PAD_ORDER: PadId[] = ['tower1', 'tower2', 'wall', 'lumber', 'miner', 'tower3', 'tower4', 'portal'];
+export const PAD_ORDER: PadId[] = ['tower1', 'tower2', 'wall', 'lumber', 'tent', 'miner', 'tower3', 'ice', 'tower4', 'portal', 'fire', 'cannon'];
+export const TOWER_PADS: Partial<Record<PadId, TowerKind>> = {
+  tower1: 'crossbow', tower2: 'crossbow', tower3: 'crossbow', tower4: 'crossbow', ice: 'ice', fire: 'fire', cannon: 'cannon',
+};
+/** Each tent brings more survivors who pay more for wood. */
+export const TENT_BONUS = 0.25;
+export const TENT_SPOTS: Pt[] = [{ x: -9.5, z: 11.5 }, { x: -12.5, z: 13.5 }, { x: -9.8, z: 15.5 }];
 export const PAD_SIZE = 2.3;
 
 // ---------- upgrades (Forge menu, persist across worlds) ----------
@@ -218,6 +237,14 @@ export const STATS = {
 export const TOOL_TIERS = [0xa0703c, 0x8c9096, 0xd0d6de, 0xffcf3f, 0x5fe0ff, 0x2ee87a, 0xff4d6d, 0x9b5cff, 0x2a1840, 0xffffff];
 
 // ---------- shop ----------
+
+export type PetId = 'fox' | 'owl' | 'dragon';
+/** Pets follow the player: fox speeds up chopping/mining, owl collects cash, dragon breathes fire at monsters. */
+export const PETS: { id: PetId; price: Price }[] = [
+  { id: 'fox', price: { em: 40 } },
+  { id: 'owl', price: { di: 15 } },
+  { id: 'dragon', price: { ob: 20 } },
+];
 
 export type SkinId = 'blue' | 'red' | 'green' | 'pink' | 'ice' | 'gold' | 'obsidian';
 export const SKINS: { id: SkinId; color: number; trim: number; price: Price }[] = [

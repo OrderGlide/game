@@ -2,7 +2,7 @@
 // Static parts of a model are merged into one vertex-coloured mesh to keep draw calls low.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { EnemyKind, PadIcon, SurvivorKind } from '../data';
+import type { EnemyKind, PadIcon, PetId, SurvivorKind, TowerKind } from '../data';
 
 export const COLORS = {
   bark: 0x9c5f2e,
@@ -649,16 +649,18 @@ export function makeGate(width: number, panel: number, wood: number, top: number
   return { root: shadowed(root), left, right };
 }
 
-export interface TowerRig { root: THREE.Group; head: THREE.Group; stock: THREE.Mesh; flag: THREE.Mesh; }
-export function makeTower(wood: number, accent: number): TowerRig {
+export interface TowerRig { root: THREE.Group; head: THREE.Group; stock: THREE.Object3D; flag: THREE.Mesh; kind: TowerKind; }
+export function makeTower(wood: number, accent: number, kind: TowerKind = 'crossbow'): TowerRig {
   const root = new THREE.Group();
   const dark = new THREE.Color(wood).multiplyScalar(0.7).getHex();
+  const stone = kind === 'ice' ? 0xbfe6f5 : kind === 'fire' ? 0x7a3a2a : kind === 'cannon' ? 0x6d737c : 0x8d939b;
+  const body = kind === 'crossbow' ? wood : kind === 'ice' ? 0xdff4ff : kind === 'fire' ? 0x9a4a32 : 0x8a9099;
   root.add(mesh([
-    P(C(0.95, 1.05, 0.35, 8), 0x8d939b, [0, 0.17, 0]),
-    P(C(0.72, 0.86, 1.9, 8), wood, [0, 1.1, 0]),
-    P(C(0.74, 0.74, 0.08, 8), dark, [0, 0.7, 0]),
-    P(C(0.74, 0.74, 0.08, 8), dark, [0, 1.5, 0]),
-    P(C(1.02, 0.95, 0.24, 8), COLORS.logEnd, [0, 2.15, 0]),
+    P(C(0.95, 1.05, 0.35, 8), stone, [0, 0.17, 0]),
+    P(C(0.72, 0.86, 1.9, 8), body, [0, 1.1, 0]),
+    P(C(0.74, 0.74, 0.08, 8), kind === 'crossbow' ? dark : stone, [0, 0.7, 0]),
+    P(C(0.74, 0.74, 0.08, 8), kind === 'crossbow' ? dark : stone, [0, 1.5, 0]),
+    P(C(1.02, 0.95, 0.24, 8), kind === 'crossbow' ? COLORS.logEnd : stone, [0, 2.15, 0]),
     P(C(0.04, 0.04, 1.4, 5), dark, [0.8, 2.8, 0]),
   ]));
   const flag = mesh([P(B(0.02, 0.35, 0.5), accent, [0, 0, -0.25])]);
@@ -667,23 +669,148 @@ export function makeTower(wood: number, accent: number): TowerRig {
   const head = new THREE.Group();
   head.position.y = 2.5;
   head.add(mesh([P(C(0.22, 0.3, 0.35, 8), dark, [0, -0.1, 0])]));
-  const stock = mesh([
-    P(B(0.26, 0.2, 1.4), wood, [0, 0.12, 0.1]),
-    P(Tor(0.62, 0.06, Math.PI), accent, [0, 0.14, 0.6], [Math.PI / 2, 0, 0]),
-    P(B(1.24, 0.03, 0.03), 0xeeeeee, [0, 0.14, 0.58]),
-    P(C(0.035, 0.035, 1.0, 5), COLORS.steel, [0, 0.25, 0.5], [Math.PI / 2, 0, 0]),
-  ]);
+  let stock: THREE.Object3D;
+  if (kind === 'ice') {
+    stock = new THREE.Group();
+    stock.add(mesh([P(C(0.16, 0.22, 0.9, 8), 0x9fd8f0, [0, 0.2, 0.25], [Math.PI / 2 - 0.2, 0, 0])]));
+    const crystal = new THREE.Mesh(merged([
+      P(O(0.32), 0xffffff, [0, 0.55, -0.1], undefined, [0.8, 1.6, 0.8]),
+      P(O(0.18), 0xffffff, [0.28, 0.4, 0.05], [0, 0, -0.5], [0.8, 1.5, 0.8]),
+      P(O(0.18), 0xffffff, [-0.28, 0.4, 0.05], [0, 0, 0.5], [0.8, 1.5, 0.8]),
+    ]), glowMat(0x8fe8ff));
+    stock.add(crystal);
+  } else if (kind === 'fire') {
+    stock = new THREE.Group();
+    stock.add(mesh([
+      P(C(0.5, 0.3, 0.35, 10), 0x3a3334, [0, 0.12, 0]),
+      P(C(0.12, 0.16, 0.8, 8), 0x2a2426, [0, 0.2, 0.45], [Math.PI / 2, 0, 0]),
+    ]));
+    const flames = new THREE.Mesh(merged([
+      P(K(0.38, 0.8, 7), 0xffffff, [0, 0.62, 0]),
+      P(K(0.2, 0.55, 6), 0xffffff, [0.18, 0.52, 0.1]),
+      P(K(0.2, 0.5, 6), 0xffffff, [-0.16, 0.5, -0.1]),
+    ]), glowMat(0xff7a1a));
+    const core = new THREE.Mesh(merged([P(K(0.2, 0.5, 6), 0xffffff, [0, 0.55, 0])]), glowMat(0xffe066));
+    stock.add(flames, core);
+  } else if (kind === 'cannon') {
+    stock = mesh([
+      P(C(0.22, 0.28, 1.3, 12), 0x2d3036, [0, 0.2, 0.25], [Math.PI / 2 - 0.12, 0, 0]),
+      P(Tor(0.24, 0.06), 0x4a4f57, [0, 0.27, 0.86], [0.12, 0, 0]),
+      P(S(0.3, 10, 8), 0x2d3036, [0, 0.12, -0.35]),
+      P(C(0.3, 0.3, 0.1, 12), wood, [0.38, 0, 0], [0, 0, Math.PI / 2]),
+      P(C(0.3, 0.3, 0.1, 12), wood, [-0.38, 0, 0], [0, 0, Math.PI / 2]),
+    ]);
+  } else {
+    stock = mesh([
+      P(B(0.26, 0.2, 1.4), wood, [0, 0.12, 0.1]),
+      P(Tor(0.62, 0.06, Math.PI), accent, [0, 0.14, 0.6], [Math.PI / 2, 0, 0]),
+      P(B(1.24, 0.03, 0.03), 0xeeeeee, [0, 0.14, 0.58]),
+      P(C(0.035, 0.035, 1.0, 5), COLORS.steel, [0, 0.25, 0.5], [Math.PI / 2, 0, 0]),
+    ]);
+  }
   head.add(stock);
   root.add(head);
-  return { root: shadowed(root), head, stock, flag };
+  return { root: shadowed(root), head, stock, flag, kind };
 }
 
-export function boltGeometry(): THREE.BufferGeometry {
-  return merged([
-    P(C(0.035, 0.035, 0.9, 5), COLORS.woodDark, undefined, [Math.PI / 2, 0, 0]),
-    P(K(0.08, 0.2, 5), COLORS.steel, [0, 0, 0.52], [Math.PI / 2, 0, 0]),
-    P(B(0.14, 0.01, 0.16), 0xffffff, [0, 0, -0.38]),
-  ]);
+export function boltGeometries(): Record<TowerKind, THREE.BufferGeometry> {
+  return {
+    crossbow: merged([
+      P(C(0.035, 0.035, 0.9, 5), COLORS.woodDark, undefined, [Math.PI / 2, 0, 0]),
+      P(K(0.08, 0.2, 5), COLORS.steel, [0, 0, 0.52], [Math.PI / 2, 0, 0]),
+      P(B(0.14, 0.01, 0.16), 0xffffff, [0, 0, -0.38]),
+    ]),
+    ice: merged([P(O(0.16), 0xbff4ff, undefined, [Math.PI / 2, 0, 0], [0.7, 2.2, 0.7]), P(O(0.08), 0xffffff, [0, 0, -0.25])]),
+    fire: merged([P(S(0.2, 8, 6), 0xff8a2a), P(S(0.13, 8, 6), 0xffe066, [0, 0, 0.06]), P(K(0.14, 0.4, 6), 0xff5a1a, [0, 0, -0.25], [-Math.PI / 2, 0, 0])]),
+    cannon: merged([P(S(0.22, 10, 8), 0x222428)]),
+  };
+}
+
+export function makeTent(color: number): THREE.Group {
+  const g = new THREE.Group();
+  const dark = new THREE.Color(color).multiplyScalar(0.7).getHex();
+  g.add(mesh([
+    P(K(1.35, 1.7, 4), color, [0, 0.85, 0], [0, Math.PI / 4, 0], [1.1, 1, 1.5]),
+    P(B(0.5, 0.9, 0.05), 0x3a2a22, [0, 0.45, 1.06]),
+    P(B(0.08, 0.08, 2.4), dark, [0, 1.72, 0]),
+    P(C(0.03, 0.03, 0.8, 4), COLORS.woodDark, [0, 2.1, 0]),
+    P(B(0.02, 0.22, 0.34), 0xffd23f, [0, 2.4, 0.17]),
+  ]));
+  return shadowed(g);
+}
+
+// ---------- pets ----------
+
+export interface PetRig { root: THREE.Group; body: THREE.Group; wings: THREE.Object3D[]; tail: THREE.Object3D | null; flying: boolean; }
+export function makePet(id: PetId): PetRig {
+  const root = new THREE.Group();
+  const body = new THREE.Group();
+  root.add(body);
+  const wings: THREE.Object3D[] = [];
+  let tail: THREE.Object3D | null = null;
+  if (id === 'fox') {
+    const o = 0xf07a2a, w = 0xfff4e6;
+    body.add(mesh([
+      P(Cap(0.22, 0.45), o, [0, 0.42, 0], [Math.PI / 2, 0, 0]),
+      P(S(0.2, 8, 6), w, [0, 0.36, 0.22], undefined, [0.9, 0.8, 0.8]),
+      P(S(0.24, 10, 8), o, [0, 0.72, 0.42]),
+      P(K(0.12, 0.25, 6), w, [0, 0.66, 0.66], [Math.PI / 2, 0, 0]),
+      P(S(0.04), 0x222222, [0, 0.66, 0.78]),
+      P(K(0.08, 0.2, 4), o, [-0.13, 0.98, 0.4]),
+      P(K(0.08, 0.2, 4), o, [0.13, 0.98, 0.4]),
+      P(S(0.035), 0x222222, [-0.09, 0.78, 0.62]),
+      P(S(0.035), 0x222222, [0.09, 0.78, 0.62]),
+      P(C(0.05, 0.05, 0.3, 5), 0x3a2a22, [-0.12, 0.15, 0.2]), P(C(0.05, 0.05, 0.3, 5), 0x3a2a22, [0.12, 0.15, 0.2]),
+      P(C(0.05, 0.05, 0.3, 5), 0x3a2a22, [-0.12, 0.15, -0.2]), P(C(0.05, 0.05, 0.3, 5), 0x3a2a22, [0.12, 0.15, -0.2]),
+    ]));
+    tail = new THREE.Group();
+    tail.position.set(0, 0.5, -0.38);
+    tail.add(mesh([P(S(0.18, 8, 6), o, [0, 0.12, -0.2], undefined, [0.9, 0.9, 1.6]), P(S(0.1, 8, 6), w, [0, 0.2, -0.45])]));
+    body.add(tail);
+  } else if (id === 'owl') {
+    const br = 0x8a5a3a, be = 0xf2d9b0;
+    body.add(mesh([
+      P(S(0.32, 12, 10), br, [0, 0, 0], undefined, [1, 1.15, 0.95]),
+      P(S(0.24, 10, 8), be, [0, -0.05, 0.14], undefined, [1, 1.1, 0.7]),
+      P(new THREE.CircleGeometry(0.11, 12), 0xffffff, [-0.11, 0.12, 0.3]),
+      P(new THREE.CircleGeometry(0.11, 12), 0xffffff, [0.11, 0.12, 0.3]),
+      P(new THREE.CircleGeometry(0.06, 10), 0x111111, [-0.11, 0.12, 0.305]),
+      P(new THREE.CircleGeometry(0.06, 10), 0x111111, [0.11, 0.12, 0.305]),
+      P(K(0.05, 0.12, 4), 0xf5a623, [0, 0.02, 0.33], [Math.PI / 2, 0, 0]),
+      P(K(0.07, 0.18, 4), br, [-0.18, 0.36, 0], [0, 0, 0.3]),
+      P(K(0.07, 0.18, 4), br, [0.18, 0.36, 0], [0, 0, -0.3]),
+    ]));
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Group();
+      wing.position.set(side * 0.3, 0.05, 0);
+      wing.add(mesh([P(S(0.2, 8, 6), 0x6b4428, [side * 0.12, 0, 0], undefined, [1.2, 0.3, 0.8])]));
+      body.add(wing);
+      wings.push(wing);
+    }
+  } else {
+    const c = 0x7a4fd6, belly = 0xf2c46a;
+    body.add(mesh([
+      P(Cap(0.2, 0.4), c, [0, 0, 0], [Math.PI / 2, 0, 0]),
+      P(Cap(0.15, 0.3), belly, [0, -0.07, 0.03], [Math.PI / 2, 0, 0], [1, 0.8, 1]),
+      P(S(0.22, 10, 8), c, [0, 0.2, 0.36]),
+      P(Cap(0.1, 0.12), c, [0, 0.14, 0.58], [Math.PI / 2, 0, 0]),
+      P(K(0.05, 0.2, 5), 0xfff4e6, [-0.1, 0.42, 0.3], [-0.4, 0, 0]),
+      P(K(0.05, 0.2, 5), 0xfff4e6, [0.1, 0.42, 0.3], [-0.4, 0, 0]),
+      P(S(0.04), 0xffe066, [-0.1, 0.26, 0.54]),
+      P(S(0.04), 0xffe066, [0.1, 0.26, 0.54]),
+      P(K(0.12, 0.45, 6), c, [0, 0, -0.45], [-Math.PI / 2, 0, 0]),
+      P(K(0.06, 0.12, 4), belly, [0, 0.2, -0.05]),
+      P(K(0.06, 0.12, 4), belly, [0, 0.2, 0.12]),
+    ]));
+    for (const side of [-1, 1]) {
+      const wing = new THREE.Group();
+      wing.position.set(side * 0.16, 0.14, 0);
+      wing.add(mesh([P(B(0.5, 0.03, 0.35), 0x5a36b0, [side * 0.26, 0, -0.02], [0, side * 0.2, 0])]));
+      body.add(wing);
+      wings.push(wing);
+    }
+  }
+  return { root: shadowed(root), body, wings, tail, flying: id !== 'fox' };
 }
 
 export function makeCounter(wood: number): THREE.Group {
@@ -833,6 +960,18 @@ export function makePadIcon(icon: PadIcon, accent: number): THREE.Group {
     }
     case 'portal': {
       m = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.1, 8, 20), new THREE.MeshBasicMaterial({ color: accent }));
+      break;
+    }
+    case 'tent': {
+      m = makeTent(0xe8a23a);
+      m.scale.setScalar(0.4);
+      m.position.y = -0.4;
+      break;
+    }
+    case 'ice': case 'fire': case 'cannon': {
+      const t = makeTower(COLORS.wood, accent, icon);
+      t.root.scale.setScalar(0.32);
+      m = t.root;
       break;
     }
   }

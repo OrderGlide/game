@@ -4,11 +4,19 @@ type Sfx = 'pick' | 'drop' | 'coin' | 'build' | 'chop' | 'upgrade' | 'hit' | 'sh
 
 let ctx: AudioContext | null = null;
 let muted = false;
+let vibrationOn = true;
+let onUnlock: (() => void) | null = null;
+
+export function getAudioContext(): AudioContext | null { return ctx; }
+export function whenAudioUnlocked(fn: () => void): void { if (ctx) fn(); else onUnlock = fn; }
+export function setVibration(on: boolean): void { vibrationOn = on; }
 const lastPlayed: Partial<Record<Sfx, number>> = {};
 
 export function unlockAudio(): void {
   if (!ctx) {
     try { ctx = new AudioContext(); } catch { return; }
+    onUnlock?.();
+    onUnlock = null;
   }
   if (ctx.state === 'suspended') void ctx.resume();
 }
@@ -54,6 +62,6 @@ export function sfx(name: Sfx): void {
 }
 
 export function vibrate(ms: number): void {
-  if (muted) return;
+  if (!vibrationOn) return;
   try { navigator.vibrate?.(ms); } catch { /* not supported */ }
 }

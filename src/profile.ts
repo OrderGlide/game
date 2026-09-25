@@ -1,8 +1,14 @@
 // Persistent player profile: everything that survives travelling between worlds.
 import {
   DAILY, GEMS, QUEST_POOL, SKINS, UPGRADES, dayKey, mulberry32,
-  type BoostId, type Gems, type Levels, type Price, type QuestKind, type SkinId,
+  type BoostId, type Gems, type Levels, type PetId, type Price, type QuestKind, type SkinId,
 } from './data';
+import type { ProductId } from './platform/config';
+
+export type Quality = 'auto' | 'low' | 'medium' | 'high';
+export interface Settings {
+  sfx: boolean; music: boolean; vibration: boolean; quality: Quality; fps: boolean; lang: 'auto' | 'pl' | 'en';
+}
 
 export interface Quest { kind: QuestKind; target: number; progress: number; reward: Price; claimed: boolean; }
 
@@ -19,7 +25,19 @@ export interface ProfileData {
   boosts: Record<Exclude<BoostId, 'repair'>, number>;
   freeChestAt: number;
   stats: { bestWave: number; worldsDone: number; kills: number };
+  pets: PetId[];
+  pet: PetId | null;
+  settings: Settings;
+  /** First-run tutorial step; 99 = finished. */
+  tutorial: number;
+  noAds: boolean;
+  owned: ProductId[];
+  /** Earliest time (ms) each "watch an ad" reward is available again. */
+  adReadyAt: Record<string, number>;
+  dailyDoubled: string;
 }
+
+export const DEFAULT_SETTINGS: Settings = { sfx: true, music: true, vibration: true, quality: 'auto', fps: false, lang: 'auto' };
 
 export function newProfile(): ProfileData {
   const levels = Object.fromEntries(UPGRADES.map((u) => [u.id, 0])) as Levels;
@@ -28,6 +46,7 @@ export function newProfile(): ProfileData {
     daily: { last: '', streak: 0 }, quests: { day: '', list: [] },
     boosts: { cash: 0, speed: 0, chop: 0 }, freeChestAt: 0,
     stats: { bestWave: 0, worldsDone: 0, kills: 0 },
+    pets: [], pet: null, settings: { ...DEFAULT_SETTINGS }, tutorial: 0, noAds: false, owned: [], adReadyAt: {}, dailyDoubled: '',
   };
 }
 
@@ -43,6 +62,12 @@ export function normalizeProfile(p: Partial<ProfileData>): ProfileData {
     boosts: { ...d.boosts, ...p.boosts },
     stats: { ...d.stats, ...p.stats },
     skins: p.skins?.length ? p.skins : d.skins,
+    settings: { ...d.settings, ...p.settings },
+    pets: p.pets ?? [],
+    owned: p.owned ?? [],
+    adReadyAt: p.adReadyAt ?? {},
+    // players from before the tutorial existed skip it
+    tutorial: p.tutorial ?? (p.world || p.stats?.kills ? 99 : 0),
   };
 }
 

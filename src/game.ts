@@ -1,10 +1,12 @@
 import {
   BOOSTS, CAMP, CAMPFIRE, CASH_ZONE, CHEST, COUNTER, COUNTER_MAX, DEPOSIT_ZONE, ENEMIES, FOREST_PEN, FORGE_ZONE, GATES,
-  GEMS, MINE_PEN, ORES, PADS, PAD_ORDER, PAD_SIZE, PLAYER, QUEUE, SKINS, STATS, TOWER, TREE, UPGRADES, WAVES, WORKER,
+  GEMS, MINE_PEN, ORES, PADS, PAD_ORDER, PAD_SIZE, PETS, PLAYER, QUEUE, SKINS, STATS, TENT_BONUS, TOWER, TOWER_KINDS, TOWER_PADS,
+  TREE, UPGRADES, WAVES, WORKER,
   WORLD, dayKey, fenceBoxes, inBox, mulberry32, regionOf, wallMax, worldAt,
   type BoostId, type Box, type EnemyKind, type Gem, type PadDef, type PadId, type Price, type Pt, type Region, type Reward,
-  type SkinId, type UpgradeId, type WorldInfo,
+  type PetId, type SkinId, type TowerKind, type UpgradeId, type WorldInfo,
 } from './data';
+import { AD_COOLDOWN, PRODUCTS, type ProductId } from './platform/config';
 import {
   DAILY_REWARDS, addGems, dailyAvailable, dailyIndex, ensureQuests, hasGems, questProgress, spendGems, type ProfileData,
 } from './profile';
@@ -26,9 +28,13 @@ export interface Enemy {
   speed: number; damage: number; attackEvery: number;
   state: 'spawn' | 'approach' | 'attack' | 'chase' | 'dead';
   delay: number; atkT: number; flash: number; hitT: number; deadT: number; face: number; walkT: number;
+  slowT: number; burnT: number; burnDps: number;
 }
-export interface Tower { id: PadId; x: number; z: number; cd: number; aim: number; recoil: number; }
-export interface Bolt { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number; target: number; dmg: number; }
+export interface Tower { id: PadId; kind: TowerKind; x: number; z: number; cd: number; aim: number; recoil: number; }
+export interface Bolt {
+  id: number; kind: TowerKind; x: number; y: number; z: number; dx: number; dy: number; dz: number; target: number; dmg: number;
+}
+export interface Pet { id: PetId; x: number; z: number; face: number; walkT: number; cd: number; }
 export interface Drop { id: number; x: number; z: number; value: number; t: number; }
 export interface Worker {
   id: number; kind: 'lumber' | 'miner'; x: number; z: number; face: number; walkT: number; moving: boolean;
@@ -45,7 +51,10 @@ export type GameEvent =
   | { type: 'toast'; text: string; sub?: string }
   | { type: 'gems'; price: Price; x: number; z: number }
   | { type: 'forge' }
-  | { type: 'worldComplete' };
+  | { type: 'worldComplete' }
+  | { type: 'waveCleared' }
+  | { type: 'offline'; amount: number }
+  | { type: 'tutorial'; step: number };
 
 export interface CampSave {
   money: number; cashPile: number; counterLogs: number;
@@ -164,7 +173,10 @@ export class Game {
   get pickLevel(): number { return STATS.pickLevel(this.lv); }
   get wallMax(): number { return wallMax(this.level('wall')); }
   get towerDamage(): number { return TOWER.damage * STATS.towerMult(this.lv) * this.world.towerMult; }
-  get logPrice(): number { return QUEUE.pricePerLog * this.world.priceMult * (this.boostActive('cash') ? 2 : 1); }
+  get logPrice(): number {
+    return QUEUE.pricePerLog * this.world.priceMult * (1 + TENT_BONUS * this.level('tent')) * (this.boostActive('cash') ? 2 : 1);
+  }
+  get toolSpeed(): number { return this.profile.pet === 'fox' ? 1.3 : 1; }
   boostActive(id: Exclude<BoostId, 'repair'>): boolean { return this.now() < this.profile.boosts[id]; }
   boostLeft(id: Exclude<BoostId, 'repair'>): number { return Math.max(0, (this.profile.boosts[id] - this.now()) / 1000); }
 
@@ -248,6 +260,7 @@ export class Game {
     this.updateTowers(dt);
     for (const w of this.workers) this.updateWorker(w, dt);
     this.updateDrops(dt);
+    this.updateTutorial();
     for (const p of this.pads) p.pulse = Math.max(0, p.pulse - dt);
   }
 
@@ -285,7 +298,7 @@ export class Game {
       p.target = best;
     }
     if (p.target) {
-      p.chopT += dt * (this.boostActive('chop') ? 2 : 1);
+      p.chopT += dt * (this.boostActive('chop') ? 2 : 1) * this.toolSpeed;
       const every = STATS.chopInterval(this.lv);
       if (p.chopT >= every) {
         p.chopT -= every;
@@ -316,7 +329,7 @@ export class Game {
       p.mining = best;
     }
     if (p.mining) {
-      p.mineT += dt;
+      p.mineT += dt * this.toolSpeed;
       const every = STATS.mineInterval(this.lv);
       if (p.mineT >= every) {
         p.mineT -= every;
@@ -468,8 +481,9 @@ export class Game {
     pad.level++;
     pad.paid = {};
     const { id, x, z } = pad.def;
-    if (id.startsWith('tower')) {
-      this.towers.push({ id, x, z, cd: 0.5, aim: -Math.PI / 2, recoil: 0 });
+    const kind = TOWER_PADS[id];
+    if (kind) {
+      this.towers.push({ id, kind, x, z, cd: 0.5, aim: -Math.PI / 2, recoil: 0 });
       const p = this.player;
       if (dist(p.x, p.z, x, z) < 1.4) p.x = x - 1.5; // step off the spot where the tower appears
     }
@@ -566,6 +580,7 @@ export class Game {
       this.breached = false;
       this.profile.stats.bestWave = Math.max(this.profile.stats.bestWave, this.wave);
       questProgress(this.profile, 'waves', 1);
+      this.events.push({ type: 'waveCleared' });
       this.wave++;
       this.waveTimer = WAVES.gap;
       this.events.push({ type: 'toast', text: T.waveCleared });
@@ -581,12 +596,13 @@ export class Game {
     this.enemies.push({
       id: this.nextId++, kind, boss, x: 27 + this.rnd() * 4, z, hp, maxHp: hp, homeZ: Math.max(-7.3, Math.min(7.3, z)),
       speed: e.speed * (boss ? 0.75 : 1), damage: e.wallDamage * (boss ? WAVES.bossDamage : 1), attackEvery: e.attackEvery,
-      state: 'spawn', delay, atkT: 0, flash: 0, hitT: 0, deadT: 0, face: -Math.PI / 2, walkT: 0,
+      state: 'spawn', delay, atkT: 0, flash: 0, hitT: 0, deadT: 0, face: -Math.PI / 2, walkT: 0, slowT: 0, burnT: 0, burnDps: 0,
     });
   }
 
   private startWave(): void {
     this.waveActive = true;
+    this.repairAdUsed = false;
     const n = WAVES.count(this.wave);
     for (let i = 0; i < n; i++) this.spawnEnemy(false, i * 1.3);
     const bossWave = this.wave % WAVES.bossEvery === 0;
@@ -632,6 +648,16 @@ export class Game {
       if (b.state === 'dead') { b.deadT += dt; continue; }
       if (b.state === 'spawn') { b.delay -= dt; if (b.delay <= 0) b.state = 'approach'; continue; }
       b.flash = Math.max(0, b.flash - dt * 9);
+      b.slowT = Math.max(0, b.slowT - dt);
+      if (b.burnT > 0) {
+        b.burnT -= dt;
+        b.hitT += dt;
+        const tick = b.hitT >= 0.35;
+        if (tick) { b.hitT = 0; this.events.push({ type: 'burst', x: b.x, y: 1.2, z: b.z, color: 0xff7a1a, n: 3 }); }
+        this.damageEnemy(b, b.burnDps * dt, false);
+        if ((b.state as Enemy['state']) === 'dead') continue;
+      }
+      const spd = b.speed * (b.slowT > 0 ? 0.5 : 1);
       const dP = dist(b.x, b.z, p.x, p.z);
       // creatures never enter the fenced forest or mine
       const canChase = (this.breached && (region === 'camp' || region === 'out')) || (region === 'out' && dP < WAVES.aggro);
@@ -646,13 +672,13 @@ export class Game {
           if (b.atkT >= 1.1) { b.atkT = 0; this.hurtPlayer(b); }
         } else {
           const wp = this.waypoint(b.x, b.z, p.x, p.z);
-          this.walkTo(b, wp.x, wp.z, b.speed * 1.15, dt, 0.1);
+          this.walkTo(b, wp.x, wp.z, spd * 1.15, dt, 0.1);
         }
       } else if (b.state === 'approach') {
         if (this.breached) {
           const wp = this.waypoint(b.x, b.z, 2, 0);
-          this.walkTo(b, wp.x, wp.z, b.speed, dt, 0.8);
-        } else if (this.walkTo(b, CAMP.half + (b.boss ? 2 : 1.2), b.homeZ, b.speed, dt, 0.15)) {
+          this.walkTo(b, wp.x, wp.z, spd, dt, 0.8);
+        } else if (this.walkTo(b, CAMP.half + (b.boss ? 2 : 1.2), b.homeZ, spd, dt, 0.15)) {
           b.state = 'attack';
           b.atkT = 0;
         }
@@ -711,36 +737,102 @@ export class Game {
     for (const t of this.towers) {
       t.cd -= dt;
       t.recoil = Math.max(0, t.recoil - dt * 4);
-      let target: Enemy | null = null, bestD = TOWER.range;
+      const spec = TOWER_KINDS[t.kind];
+      let target: Enemy | null = null, bestD = Infinity;
       for (const b of this.enemies) {
         if (b.state === 'dead' || b.state === 'spawn') continue;
         const d = dist(b.x, b.z, t.x, t.z);
-        if (d < bestD) { target = b; bestD = d; }
+        if (d > TOWER.range) continue;
+        // ice and fire towers prefer creatures that aren't already slowed / burning
+        const score = d + (t.kind === 'ice' && b.slowT > 0 ? 8 : 0) + (t.kind === 'fire' && b.burnT > 0 ? 8 : 0) - (b.boss ? 3 : 0);
+        if (score < bestD) { target = b; bestD = score; }
       }
       if (!target) continue;
       t.aim = turnTo(t.aim, Math.atan2(target.x - t.x, target.z - t.z), dt * 10);
       if (t.cd <= 0) {
-        t.cd = TOWER.every;
+        t.cd = spec.every;
         t.recoil = 1;
-        this.bolts.push({ id: this.nextId++, x: t.x, y: 2.9, z: t.z, dx: 0, dy: 0, dz: 1, target: target.id, dmg: this.towerDamage });
+        this.shoot(t.kind, t.x, t.kind === 'cannon' ? 2.4 : 2.9, t.z, target, this.towerDamage * spec.damage);
         sfx('shoot');
       }
     }
+    this.updatePet(dt);
     for (const bolt of this.bolts) {
       const b = this.enemies.find((x) => x.id === bolt.target);
       if (!b || b.state === 'dead') { bolt.target = -1; continue; }
       const ty = b.boss ? 2 : 1;
       const dx = b.x - bolt.x, dy = ty - bolt.y, dz = b.z - bolt.z, d = Math.hypot(dx, dy, dz);
-      const step = 28 * dt;
+      const step = (bolt.kind === 'cannon' ? 18 : 28) * dt;
       bolt.dx = dx / d; bolt.dy = dy / d; bolt.dz = dz / d;
       if (d <= step + (b.boss ? 1 : 0.3)) {
-        this.damageEnemy(b, bolt.dmg, true);
+        this.boltHit(bolt, b);
         bolt.target = -1;
         continue;
       }
       bolt.x += bolt.dx * step; bolt.y += bolt.dy * step; bolt.z += bolt.dz * step;
     }
     this.bolts = this.bolts.filter((b) => b.target !== -1);
+  }
+
+  private shoot(kind: TowerKind, x: number, y: number, z: number, target: Enemy, dmg: number): void {
+    this.bolts.push({ id: this.nextId++, kind, x, y, z, dx: 0, dy: 0, dz: 1, target: target.id, dmg });
+  }
+
+  private boltHit(bolt: Bolt, b: Enemy): void {
+    const spec = TOWER_KINDS[bolt.kind];
+    if (spec.splash) {
+      this.events.push({ type: 'burst', x: b.x, y: 0.8, z: b.z, color: 0x555555, n: 16 });
+      this.events.push({ type: 'burst', x: b.x, y: 0.8, z: b.z, color: 0xffb02e, n: 10 });
+      this.events.push({ type: 'shake', power: 0.12 });
+      for (const o of this.enemies) {
+        if (o.state === 'dead' || o.state === 'spawn') continue;
+        if (dist(o.x, o.z, b.x, b.z) <= spec.splash) this.damageEnemy(o, bolt.dmg * (o === b ? 1 : 0.6), true);
+      }
+      sfx('thud');
+      return;
+    }
+    if (spec.slow) { b.slowT = Math.max(b.slowT, spec.slow); this.events.push({ type: 'burst', x: b.x, y: 1.2, z: b.z, color: 0x9fe6ff, n: 6 }); }
+    if (spec.burn) { b.burnT = spec.burn; b.burnDps = Math.max(b.burnDps, this.towerDamage * 0.6); }
+    this.damageEnemy(b, bolt.dmg, true);
+  }
+
+  // ---------- pet ----------
+
+  pet: Pet | null = null;
+
+  private updatePet(dt: number): void {
+    const id = this.profile.pet;
+    if (!id) { this.pet = null; return; }
+    const p = this.player;
+    if (!this.pet || this.pet.id !== id) this.pet = { id, x: p.x - 1, z: p.z + 1, face: 0, walkT: 0, cd: 1 };
+    const pet = this.pet;
+    // trail behind and to the side of the player
+    const tx = p.x - Math.sin(p.face) * 1.3 + Math.cos(p.face) * 0.9, tz = p.z - Math.cos(p.face) * 1.3 - Math.sin(p.face) * 0.9;
+    const d = dist(pet.x, pet.z, tx, tz);
+    if (d > 8) { pet.x = tx; pet.z = tz; }
+    this.walkTo(pet, tx, tz, Math.max(4, d * 3), dt, 0.2);
+    pet.cd -= dt;
+    if (pet.cd > 0) return;
+    if (id === 'owl' && this.cashPile > 0) {
+      pet.cd = 1.2;
+      const chunk = Math.max(1, Math.ceil(this.cashPile / 6));
+      this.cashPile -= chunk;
+      this.money += chunk;
+      this.events.push({ type: 'fly', kind: 'cash', x0: CASH_ZONE.x, y0: 0.6, z0: CASH_ZONE.z, x1: pet.x, y1: 2, z1: pet.z });
+      this.onChange?.();
+    } else if (id === 'dragon') {
+      let target: Enemy | null = null, best = 9;
+      for (const b of this.enemies) {
+        if (b.state === 'dead' || b.state === 'spawn') continue;
+        const dd = dist(b.x, b.z, pet.x, pet.z);
+        if (dd < best) { best = dd; target = b; }
+      }
+      if (target) {
+        pet.cd = 1;
+        pet.face = Math.atan2(target.x - pet.x, target.z - pet.z);
+        this.shoot('fire', pet.x, 1.8, pet.z, target, this.towerDamage * 1.2);
+      }
+    }
   }
 
   private updateDrops(dt: number): void {
@@ -755,7 +847,7 @@ export class Game {
         d.value = 0;
         sfx('coin');
         this.onChange?.();
-      } else if (dd < 3) {
+      } else if (dd < (this.profile.pet === 'owl' ? 7 : 3)) {
         const step = Math.min(dd, 12 * dt);
         d.x += ((p.x - d.x) / dd) * step;
         d.z += ((p.z - d.z) / dd) * step;
@@ -976,6 +1068,118 @@ export class Game {
     return null;
   }
 
+  // ---------- pets ----------
+
+  buyPet(id: PetId): boolean {
+    const def = PETS.find((p) => p.id === id)!;
+    if (this.profile.pets.includes(id)) { this.profile.pet = this.profile.pet === id ? null : id; this.onChange?.(); return true; }
+    if (!hasGems(this.profile, def.price)) return false;
+    spendGems(this.profile, def.price);
+    this.profile.pets.push(id);
+    this.profile.pet = id;
+    sfx('build');
+    this.onChange?.();
+    return true;
+  }
+
+  // ---------- ads & purchases ----------
+
+  repairAdUsed = false;
+  pendingOffline = 0;
+
+  adReady(key: string): boolean { return this.now() >= (this.profile.adReadyAt[key] ?? 0); }
+  adWait(key: string): number { return Math.max(0, ((this.profile.adReadyAt[key] ?? 0) - this.now()) / 1000); }
+
+  /** Reward for watching an ad: a free 5-minute boost. */
+  adBoost(id: Exclude<BoostId, 'repair'>): void {
+    this.applyBoost(id, 300);
+    this.profile.adReadyAt[id] = this.now() + AD_COOLDOWN.boost * 1000;
+    this.onChange?.();
+  }
+
+  /** Reward for watching an ad: open a free chest now. */
+  adChest(): Price {
+    const saved = this.profile.freeChestAt;
+    this.profile.freeChestAt = 0;
+    const got = this.openChest(true)!;
+    this.profile.freeChestAt = saved;
+    this.profile.adReadyAt.chest = this.now() + AD_COOLDOWN.chest * 1000;
+    return got;
+  }
+
+  canAdRepair(): boolean { return this.breached && !this.repairAdUsed; }
+  adRepair(): void {
+    this.repairAdUsed = true;
+    this.applyBoost('repair', 0);
+    this.events.push({ type: 'toast', text: T.repaired });
+    this.onChange?.();
+  }
+
+  canDoubleDaily(): boolean { return !this.dailyAvailable() && this.profile.dailyDoubled !== dayKey(); }
+  /** Reward for watching an ad after claiming the daily reward: get it again (skins excluded). */
+  doubleDaily(): Reward {
+    const r = DAILY_REWARDS[this.dailyIndex()];
+    const got: Reward = {};
+    if (r.cash) { got.cash = Math.round(r.cash * this.world.priceMult); this.money += got.cash; }
+    for (const g of GEMS) { const n = r[g] ?? 0; if (n) { got[g] = n; this.profile.gems[g] += n; } }
+    if (r.boost) { got.boost = r.boost; this.applyBoost(r.boost, 300); }
+    this.profile.dailyDoubled = dayKey();
+    this.onChange?.();
+    return got;
+  }
+
+  claimOffline(mult: number): number {
+    const n = this.pendingOffline * mult;
+    this.cashPile += n;
+    this.pendingOffline = 0;
+    this.onChange?.();
+    return n;
+  }
+
+  owns(id: ProductId): boolean { return this.profile.owned.includes(id); }
+
+  /** Hands out what a completed Google Play purchase bought. */
+  grantProduct(id: ProductId): void {
+    const def = PRODUCTS.find((p) => p.id === id)!;
+    const g = def.grant;
+    addGems(this.profile, g);
+    if (g.cash) this.money += g.cash * this.world.priceMult;
+    if (g.skin && !this.profile.skins.includes(g.skin)) { this.profile.skins.push(g.skin); this.profile.skin = g.skin; }
+    if (g.noAds) this.profile.noAds = true;
+    if (!def.consumable && !this.profile.owned.includes(id)) this.profile.owned.push(id);
+    // the starter pack also removes forced ads, as a thank-you for the first purchase
+    if (id === 'starter_pack') this.profile.noAds = true;
+    sfx('build');
+    this.onChange?.();
+  }
+
+  // ---------- tutorial ----------
+
+  private tutMoved = 0;
+  private tutLastX = PLAYER.start.x;
+  private tutLastZ = PLAYER.start.z;
+
+  private updateTutorial(): void {
+    const t = this.profile.tutorial;
+    if (t >= 99) return;
+    const p = this.player;
+    this.tutMoved += dist(p.x, p.z, this.tutLastX, this.tutLastZ);
+    this.tutLastX = p.x;
+    this.tutLastZ = p.z;
+    let next = t;
+    if (t === 0 && this.tutMoved > 3) next = 1;
+    if (t === 1 && p.stack.length > 0) next = 2;
+    if (t === 2 && (this.counterLogs > 0 || this.cashPile > 0)) next = 3;
+    if (t === 3 && this.money > 0) next = 4;
+    if (t <= 4 && this.level('tower1') > 0) next = 99;
+    if (next !== t) {
+      this.profile.tutorial = next;
+      this.events.push({ type: 'tutorial', step: next });
+      if (next === 99) this.events.push({ type: 'toast', text: T.tutDone, sub: T.tutDoneSub });
+      this.onChange?.();
+    }
+  }
+
   // ---------- guidance ----------
 
   /** Next thing the player should do: hint text plus where the guide arrow points. */
@@ -1070,8 +1274,9 @@ export class Game {
       if (!s) continue;
       p.level = Math.min(s.level, p.def.max);
       p.paid = { ...s.paid };
-      if (p.def.id.startsWith('tower') && p.level > 0) {
-        this.towers.push({ id: p.def.id, x: p.def.x, z: p.def.z, cd: 0, aim: -Math.PI / 2, recoil: 0 });
+      const kind = TOWER_PADS[p.def.id];
+      if (kind && p.level > 0) {
+        this.towers.push({ id: p.def.id, kind, x: p.def.x, z: p.def.z, cd: 0, aim: -Math.PI / 2, recoil: 0 });
       }
     }
     for (let i = 0; i < this.level('lumber'); i++) this.spawnWorker('lumber');
@@ -1089,8 +1294,8 @@ export class Game {
     const lumber = this.level('lumber');
     if (away > 60 && lumber > 0) {
       const earned = Math.floor(away * lumber * 0.25 * this.world.priceMult);
-      this.cashPile += earned;
-      this.events.push({ type: 'toast', text: T.welcome, sub: `+$${formatNum(earned)}` });
+      this.pendingOffline = earned;
+      this.events.push({ type: 'offline', amount: earned });
     }
   }
 }

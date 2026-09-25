@@ -39,8 +39,35 @@ Sterowanie: przeciągnij palcem w dowolnym miejscu (wirtualny joystick) albo WAS
 | `src/audio.ts` | Dźwięki syntezowane w WebAudio + wibracje |
 | `src/i18n.ts` | Teksty PL/EN |
 | `src/main.ts` | Pętla gry, zapis w `localStorage`, podróż przez portal |
+| `src/platform/` | Reklamy AdMob, zakupy Google Play i ich konfiguracja (`config.ts`) |
+| `src/music.ts` | Muzyka generowana dla każdego świata |
 
 Logika w `game.ts` nie zależy od grafiki, więc da się ją testować i balansować symulacją (bot grający w grę) bez przeglądarki.
+
+## Zarabianie: reklamy i zakupy
+
+Gra ma już podpięte:
+- **Google AdMob** (`@capacitor-community/admob`):
+  - reklamy z nagrodą: podwojenie nagrody dziennej, podwojenie zarobku offline, darmowy boost, skrzynia od razu, naprawa palisady,
+  - rzadkie reklamy pełnoekranowe: najwcześniej po 5 minutach gry, co najmniej 4 minuty odstępu i tylko po odpartej fali,
+  - okno zgody RODO/GDPR (Google UMP).
+- **Google Play Billing** (`@capgo/native-purchases`): paczki klejnotów, pakiet startowy, „Bez reklam” i przywracanie zakupów.
+
+W przeglądarce zamiast reklamy pokazuje się oznaczona „Reklama testowa”, a zakupy działają tylko w wersji deweloperskiej (`npm run dev`).
+
+### Co musisz ustawić przed wydaniem
+
+1. **AdMob** ([admob.google.com](https://admob.google.com)): dodaj aplikację i utwórz 2 jednostki reklamowe: *Z nagrodą* i *Pełnoekranowa*.
+   - Wpisz swoje ID w `src/platform/config.ts` (`ADMOB`) i ID aplikacji w `android/app/src/main/AndroidManifest.xml`.
+   - Zostaw `testing: true`, dopóki testujesz. **Nigdy nie klikaj prawdziwych reklam we własnej grze**, bo Google blokuje za to konto.
+   - W AdMob → Prywatność i wiadomości utwórz komunikat zgody RODO (GDPR).
+2. **Google Play Console** → Zarabianie → Produkty → Produkty w aplikacji: utwórz produkty o identyfikatorach
+   `starter_pack`, `gems_small`, `gems_medium`, `gems_large`, `no_ads` i ustaw ceny.
+   Ceny w grze wczytają się automatycznie ze sklepu.
+3. **Profil płatności** w Play Console i dane do wypłat w AdMob (konto bankowe, dane podatkowe). Wymaga ukończonych 18 lat.
+4. **Polityka prywatności:** reklamy zbierają identyfikator reklamowy, więc potrzebny jest publiczny link do polityki prywatności
+   i poprawnie wypełniona sekcja „Bezpieczeństwo danych” w Play Console.
+5. Zakupy są sprawdzane tylko na telefonie. Przy dużej grze warto dodać weryfikację na serwerze.
 
 ## Budowanie na Androida
 

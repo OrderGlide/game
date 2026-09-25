@@ -1,9 +1,11 @@
-import type { BoostId, Gem, PadId, QuestKind, SkinId, UpgradeId, WorldId } from './data';
+import type { BoostId, Gem, PadId, PetId, QuestKind, SkinId, UpgradeId, WorldId } from './data';
+import type { ProductId } from './platform/config';
 
 const pl = {
   pad: {
     tower1: 'Wieża z kuszą', tower2: 'Wieża z kuszą', tower3: 'Wieża z kuszą', tower4: 'Wieża z kuszą',
     lumber: 'Drwal', miner: 'Górnik', wall: 'Mocniejsza palisada', portal: 'Portal',
+    tent: 'Namiot', ice: 'Wieża lodowa', fire: 'Wieża ognista', cannon: 'Armata',
   } as Record<PadId, string>,
   gem: { em: 'szmaragdy', di: 'diamenty', ob: 'obsydian' } as Record<Gem, string>,
   world: {
@@ -86,6 +88,50 @@ const pl = {
   close: 'Zamknij',
   boostTag: 'boost',
   skinTag: 'skórka',
+  adTest: 'Reklama testowa',
+  adTestNote: 'W aplikacji na Androida wyświetli się tu prawdziwa reklama AdMob.',
+  repaired: 'Palisada naprawiona!',
+  tutDone: 'Brawo!',
+  tutDoneSub: 'Rozbudowuj obóz i broń go przed potworami',
+  tut: ['Przeciągnij palcem po ekranie, żeby chodzić', 'Idź do lasu, topory same ścinają drzewa', 'Zanieś bale na ladę',
+    'Ocaleni płacą: zbierz pieniądze', 'Kup wieżę z kuszą, zanim przyjdą potwory'],
+  adFree: '📺 Za darmo',
+  adDouble: '📺 Podwój nagrodę',
+  adRepair: '📺 Napraw palisadę',
+  adOpenNow: '📺 Otwórz teraz',
+  tabGems: 'Klejnoty',
+  tabPets: 'Zwierzaki',
+  product: {
+    starter_pack: 'Pakiet startowy', gems_small: 'Garść klejnotów', gems_medium: 'Worek klejnotów', gems_large: 'Skrzynia skarbów', no_ads: 'Bez reklam',
+  } as Record<ProductId, string>,
+  productInfo: {
+    starter_pack: 'Klejnoty, Lodowa kurtka i koniec reklam pełnoekranowych', gems_small: '', gems_medium: '', gems_large: '',
+    no_ads: 'Znikają reklamy pełnoekranowe. Reklamy za nagrody zostają dobrowolne.',
+  } as Record<ProductId, string>,
+  bought: 'Kupione',
+  restore: 'Przywróć zakupy',
+  storeOnlyApp: 'Zakupy działają w aplikacji pobranej z Google Play.',
+  bestValue: 'Najlepsza oferta',
+  pet: { fox: 'Lisek', owl: 'Sowa', dragon: 'Smoczek' } as Record<PetId, string>,
+  petInfo: { fox: '+30% szybsze cięcie i kopanie', owl: 'Sama zbiera pieniądze z lady', dragon: 'Zieje ogniem w potwory' } as Record<PetId, string>,
+  petOn: 'Z Tobą',
+  petTake: 'Weź',
+  settingsTitle: 'Ustawienia',
+  sSfx: 'Efekty dźwiękowe',
+  sMusic: 'Muzyka',
+  sVibration: 'Wibracje',
+  sQuality: 'Grafika',
+  sFps: 'Licznik FPS',
+  sLang: 'Język',
+  quality: { auto: 'Auto', low: 'Niska', medium: 'Średnia', high: 'Wysoka' } as Record<'auto' | 'low' | 'medium' | 'high', string>,
+  on: 'Wł.',
+  off: 'Wył.',
+  reset: 'Zacznij od nowa',
+  resetConfirm: 'Na pewno? Dotknij jeszcze raz, żeby usunąć cały postęp',
+  offlineTitle: 'Witaj z powrotem!',
+  offlineText: 'Drwale zarobili podczas Twojej nieobecności:',
+  collect: 'Odbierz',
+  version: 'Wersja',
 };
 
 type Dict = typeof pl;
@@ -94,6 +140,7 @@ const en: Dict = {
   pad: {
     tower1: 'Crossbow tower', tower2: 'Crossbow tower', tower3: 'Crossbow tower', tower4: 'Crossbow tower',
     lumber: 'Lumberjack', miner: 'Miner', wall: 'Stronger palisade', portal: 'Portal',
+    tent: 'Tent', ice: 'Ice tower', fire: 'Fire tower', cannon: 'Cannon',
   },
   gem: { em: 'emeralds', di: 'diamonds', ob: 'obsidian' },
   world: {
@@ -169,10 +216,57 @@ const en: Dict = {
   close: 'Close',
   boostTag: 'boost',
   skinTag: 'skin',
+  adTest: 'Test ad',
+  adTestNote: 'In the Android app a real AdMob ad plays here.',
+  repaired: 'Palisade repaired!',
+  tutDone: 'Well done!',
+  tutDoneSub: 'Grow your camp and defend it from monsters',
+  tut: ['Drag your finger anywhere to walk', 'Go to the forest, your axes chop trees by themselves', 'Bring the logs to the counter',
+    'Survivors pay: collect your cash', 'Buy a crossbow tower before the monsters come'],
+  adFree: '📺 Free',
+  adDouble: '📺 Double reward',
+  adRepair: '📺 Repair palisade',
+  adOpenNow: '📺 Open now',
+  tabGems: 'Gems',
+  tabPets: 'Pets',
+  product: { starter_pack: 'Starter pack', gems_small: 'Handful of gems', gems_medium: 'Bag of gems', gems_large: 'Treasure chest', no_ads: 'No ads' },
+  productInfo: {
+    starter_pack: 'Gems, the Ice parka and no more full-screen ads', gems_small: '', gems_medium: '', gems_large: '',
+    no_ads: 'Removes full-screen ads. Ads for rewards stay optional.',
+  },
+  bought: 'Owned',
+  restore: 'Restore purchases',
+  storeOnlyApp: 'Purchases work in the app from Google Play.',
+  bestValue: 'Best value',
+  pet: { fox: 'Fox', owl: 'Owl', dragon: 'Baby dragon' },
+  petInfo: { fox: '+30% faster chopping and mining', owl: 'Collects cash from the counter', dragon: 'Breathes fire at monsters' },
+  petOn: 'With you',
+  petTake: 'Take',
+  settingsTitle: 'Settings',
+  sSfx: 'Sound effects',
+  sMusic: 'Music',
+  sVibration: 'Vibration',
+  sQuality: 'Graphics',
+  sFps: 'FPS counter',
+  sLang: 'Language',
+  quality: { auto: 'Auto', low: 'Low', medium: 'Medium', high: 'High' },
+  on: 'On',
+  off: 'Off',
+  reset: 'Start over',
+  resetConfirm: 'Are you sure? Tap again to delete all progress',
+  offlineTitle: 'Welcome back!',
+  offlineText: 'Your lumberjacks earned while you were away:',
+  collect: 'Collect',
+  version: 'Version',
 };
 
-const lang = (globalThis.navigator?.language || 'en').toLowerCase().startsWith('pl') ? 'pl' : 'en';
-export const T: Dict = lang === 'pl' ? pl : en;
+const deviceLang = (globalThis.navigator?.language || 'en').toLowerCase().startsWith('pl') ? 'pl' : 'en';
+export let T: Dict = deviceLang === 'pl' ? pl : en;
+
+/** 'auto' follows the phone's language. */
+export function setLang(l: 'auto' | 'pl' | 'en'): void {
+  T = (l === 'auto' ? deviceLang : l) === 'pl' ? pl : en;
+}
 
 export function fmt(s: string, vars: Record<string, string | number>): string {
   return s.replace(/\{(\w+)\}/g, (_, k: string) => String(vars[k] ?? ''));

@@ -1,18 +1,18 @@
 // Three.js scene: builds the current world and mirrors the game state every frame.
 import * as THREE from 'three';
 import {
-  CAMPFIRE, CASH_ZONE, COUNTER, DEPOSIT_ZONE, FOREST_PEN, FORGE_ZONE, GATES, MINE_PEN, PAD_SIZE, TOOL_TIERS, WORLDS,
-  fenceBoxes, mulberry32, type Gem, type PadId, type Price, type SurvivorKind,
+  CAMPFIRE, CASH_ZONE, COUNTER, DEPOSIT_ZONE, FOREST_PEN, FORGE_ZONE, GATES, MINE_PEN, PAD_SIZE, TENT_SPOTS, TOOL_TIERS, WORLDS,
+  fenceBoxes, mulberry32, type Gem, type PadId, type Price, type SurvivorKind, type TowerKind,
 } from '../data';
 import { formatNum, type Game, type GameEvent, type PadState } from '../game';
-import { skinDef } from '../profile';
+import { skinDef, type Quality } from '../profile';
 import { T } from '../i18n';
 import type { Hud } from './hud';
 import {
-  animateCharacter, animateEnemy, billGeometry, boltGeometry, fenceLogGeometry, logGeometry, makeAnvil, makeArrow, makeAxe,
-  makeBackpack, makeCampfire, makeCharacter, makeCounter, makeEnemy, makeGate, makePadIcon, makePickaxe, makePortal,
-  makeTower, mat, vertexMat,
-  type CampfireRig, type CharacterRig, type EnemyRig, type GateRig, type PortalRig, type TowerRig,
+  animateCharacter, animateEnemy, billGeometry, boltGeometries, fenceLogGeometry, logGeometry, makeAnvil, makeArrow, makeAxe,
+  makeBackpack, makeCampfire, makeCharacter, makeCounter, makeEnemy, makeGate, makePadIcon, makePet, makePickaxe, makePortal,
+  makeTent, makeTower, mat, vertexMat,
+  type CampfireRig, type CharacterRig, type EnemyRig, type GateRig, type PetRig, type PortalRig, type TowerRig,
 } from './models';
 import { GEM_COLOR, buildDecor, oreGeometries, treeGeometries } from './nature';
 import { THEMES, type Theme } from './theme';
@@ -159,7 +159,16 @@ export class View {
   private enemies = new Map<number, EnemyView>();
   private towers = new Map<PadId, { rig: TowerRig; t: number }>();
   private bolts = new Map<number, THREE.Mesh>();
-  private boltGeo = boltGeometry();
+  private boltGeo = boltGeometries();
+  private petRig: PetRig | null = null;
+  private petId = '';
+  private tents: THREE.Group[] = [];
+  private quality: Exclude<Quality, 'auto'> = 'high';
+  private autoQuality = true;
+  private fpsT = 0;
+  private fpsFrames = 0;
+  private fpsChecks = 0;
+  fps = 60;
   private gates: { rig: GateRig; x: number; z: number; open: number }[] = [];
   private pads = new Map<PadId, PadView>();
   private portal: PortalRig | null = null;
@@ -184,8 +193,58 @@ export class View {
     r.shadowMap.enabled = true;
     r.shadowMap.type = THREE.PCFShadowMap;
     this.renderer = r;
+    // phones with very dense screens start one step lower; auto mode adapts from there
+    this.quality = (window.devicePixelRatio || 1) > 2.5 ? 'medium' : 'high';
     this.resize();
     window.addEventListener('resize', () => this.resize());
+  }
+
+  /** 'auto' measures FPS and steps down while the game runs slowly. */
+  setQuality(q: Quality): void {
+    this.autoQuality = q === 'auto';
+    if (q !== 'auto') this.applyQuality(q);
+    this.fpsChecks = 0;
+  }
+
+  private applyQuality(q: Exclude<Quality, 'auto'>): void {
+    this.quality = q;
+    const dpr = window.devicePixelRatio || 1;
+    this.renderer.setPixelRatio(q === 'high' ? Math.min(dpr, 2) : q === 'medium' ? Math.min(dpr, 1.5) : 1);
+    const shadows = q !== 'low';
+    if (this.renderer.shadowMap.enabled !== shadows) {
+      this.renderer.shadowMap.enabled = shadows;
+      this.scene.traverse((o) => {
+        const m = (o as THREE.Mesh).material;
+        if (m) (Array.isArray(m) ? m : [m]).forEach((x) => { x.needsUpdate = true; });
+      });
+    }
+    if (this.sun) {
+      this.sun.castShadow = shadows;
+      const size = q === 'high' ? 2048 : 1024;
+      if (this.sun.shadow.mapSize.x !== size) {
+        this.sun.shadow.mapSize.set(size, size);
+        this.sun.shadow.map?.dispose();
+        this.sun.shadow.map = null;
+      }
+    }
+    if (this.ambient) this.ambient.geometry.setDrawRange(0, q === 'high' ? 600 : q === 'medium' ? 300 : 120);
+    this.resize();
+  }
+
+  private trackFps(dt: number): void {
+    this.fpsFrames++;
+    this.fpsT += dt;
+    if (this.fpsT < 1) return;
+    this.fps = Math.round(this.fpsFrames / this.fpsT);
+    this.fpsFrames = 0;
+    this.fpsT = 0;
+    if (!this.autoQuality || this.quality === 'low') return;
+    // after a warm-up second, three slow seconds in a row step the graphics down
+    this.fpsChecks = this.fps < 40 ? this.fpsChecks + 1 : 0;
+    if (this.fpsChecks >= 3) {
+      this.fpsChecks = 0;
+      this.applyQuality(this.quality === 'high' ? 'medium' : 'low');
+    }
   }
 
   resize(): void {
@@ -219,6 +278,9 @@ export class View {
     this.axes = [];
     this.axeGroup = new THREE.Group();
     this.arrow = makeArrow();
+    this.petRig = null;
+    this.petId = '';
+    this.tents = [];
 
     const th = (this.theme = THEMES[game.world.def.id]);
     const s = this.scene;
@@ -274,6 +336,7 @@ export class View {
 
     this.ambient = this.buildAmbient(th);
     this.camTarget.set(game.player.x, 0, game.player.z);
+    this.applyQuality(this.quality);
   }
 
   private instanced(geo: THREE.BufferGeometry, m: THREE.Material, n: number, shadow = true): THREE.InstancedMesh {
@@ -534,6 +597,7 @@ export class View {
         case 'toast': hud.showToast(e.text, e.sub); break;
         case 'forge': hud.openForge(); break;
         case 'worldComplete': hud.worldComplete(); break;
+        case 'offline': hud.showOffline(e.amount); break;
       }
     }
     events.length = 0;
@@ -553,6 +617,7 @@ export class View {
 
   update(g: Game, dt: number, objective: { x: number; z: number } | null): void {
     this.time += dt;
+    this.trackFps(dt);
     const t = this.time, p = g.player;
 
     this.camTarget.lerp(tmpP.set(p.x, 0, p.z), Math.min(1, dt * 6));
@@ -566,6 +631,8 @@ export class View {
     this.sun.target.position.copy(this.camTarget);
 
     this.updatePlayer(g, t);
+    this.updatePet(g, t);
+    this.updateTents(g);
     this.updateTrees(g, t);
     this.updateOres(g, t);
     this.updateSurvivors(g);
@@ -683,6 +750,38 @@ export class View {
     }
     this.stack.count = n;
     this.stack.instanceMatrix.needsUpdate = true;
+  }
+
+  private updatePet(g: Game, t: number): void {
+    const pet = g.pet;
+    const id = pet?.id ?? '';
+    if (id !== this.petId) {
+      if (this.petRig) this.scene.remove(this.petRig.root);
+      this.petRig = pet ? makePet(pet.id) : null;
+      if (this.petRig) this.scene.add(this.petRig.root);
+      this.petId = id;
+    }
+    if (!pet || !this.petRig) return;
+    const r = this.petRig;
+    r.root.position.set(pet.x, r.flying ? 1.6 + Math.sin(t * 3) * 0.15 : 0, pet.z);
+    r.root.rotation.y = pet.face;
+    r.wings.forEach((w, i) => { w.rotation.z = Math.sin(t * 14) * 0.6 * (i ? -1 : 1); });
+    if (r.tail) r.tail.rotation.y = Math.sin(t * 5) * 0.4;
+    if (!r.flying) r.body.position.y = Math.abs(Math.sin(pet.walkT)) * 0.08;
+  }
+
+  private updateTents(g: Game): void {
+    const n = Math.min(g.level('tent'), TENT_SPOTS.length);
+    const colors = [0xe8a23a, 0x3aa0e8, 0xe85a5a];
+    while (this.tents.length < n) {
+      const i = this.tents.length, spot = TENT_SPOTS[i];
+      const tent = makeTent(colors[i % colors.length]);
+      tent.position.set(spot.x, 0, spot.z);
+      tent.rotation.y = 0.4 + i * 0.5;
+      this.scene.add(tent);
+      this.tents.push(tent);
+      this.burst(spot.x, 1, spot.z, 0xffd23f, 16, 5);
+    }
   }
 
   private updateTrees(g: Game, t: number): void {
@@ -819,7 +918,8 @@ export class View {
         moving: b.state === 'approach' || (b.state === 'chase' && b.atkT === 0), attack, t: t + b.id, walkT: b.walkT,
         dead: b.state === 'dead' ? b.deadT + 0.0001 : 0,
       });
-      rig.material.emissive.setRGB(b.flash * 0.5, 0, 0);
+      const burn = b.burnT > 0 ? 0.25 + Math.sin(t * 20) * 0.1 : 0;
+      rig.material.emissive.setRGB(b.flash * 0.5 + burn, burn * 0.35, b.slowT > 0 ? 0.35 : 0);
       const showHp = b.state !== 'dead' && b.hp < b.maxHp;
       hpBg.visible = hpFill.visible = showHp;
       if (showHp) {
@@ -843,7 +943,7 @@ export class View {
     for (const tw of g.towers) {
       let v = this.towers.get(tw.id);
       if (!v) {
-        v = { rig: makeTower(this.theme.fence, this.theme.gate), t: 0 };
+        v = { rig: makeTower(this.theme.fence, this.theme.gate, tw.kind), t: 0 };
         v.rig.root.position.set(tw.x, 0, tw.z);
         this.scene.add(v.rig.root);
         this.towers.set(tw.id, v);
@@ -858,8 +958,9 @@ export class View {
     for (const b of g.bolts) {
       seen.add(b.id);
       let m = this.bolts.get(b.id);
-      if (!m) { m = new THREE.Mesh(this.boltGeo, vertexMat()); this.bolts.set(b.id, m); this.scene.add(m); }
+      if (!m) { m = new THREE.Mesh(this.boltGeo[b.kind as TowerKind], vertexMat()); this.bolts.set(b.id, m); this.scene.add(m); }
       m.position.set(b.x, b.y, b.z);
+      if (b.kind === 'fire' && Math.random() < 0.5) this.burst(b.x, b.y, b.z, 0xff8a2a, 1, 0.5);
       m.lookAt(b.x + b.dx, b.y + b.dy, b.z + b.dz);
     }
     for (const [id, m] of this.bolts) if (!seen.has(id)) { this.scene.remove(m); this.bolts.delete(id); }

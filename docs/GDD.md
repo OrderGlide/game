@@ -76,17 +76,22 @@ Palisada pada 3 razy w pierwszym świecie i do 21 razy w szóstym, więc trudno�
   zarób $, odeprzyj fale) z nagrodami w klejnotach.
 - **Offline:** drwale zarabiają do 2 h pod nieobecność gracza.
 
-## 7. Monetyzacja (do dodania przed premierą)
+## 7. Monetyzacja (zrobione, do podmiany ID przed premierą)
 
-Sklep jest już przygotowany pod płatności: waluta premium (klejnoty), boosty, skórki i skrzynie.
-Do dodania:
-1. **Reklamy z nagrodą:** „podwój nagrodę dzienną”, „darmowy boost”, „otwórz skrzynię teraz”, „napraw palisadę”.
-2. **Zakupy w aplikacji:** paczki klejnotów, „Usuń reklamy”, pakiet startowy, przepustka sezonowa.
-3. Technicznie: AdMob (`@capacitor-community/admob`) + Google Play Billing (np. RevenueCat), okno zgody GDPR, polityka prywatności.
+1. **Reklamy z nagrodą** (dobrowolne): podwojenie nagrody dziennej, podwojenie zarobku offline, darmowy boost (co 10 min),
+   skrzynia od razu (co 30 min), naprawa palisady podczas przebicia (raz na falę).
+2. **Reklamy pełnoekranowe**: najwcześniej po 5 min sesji, co najmniej 4 min odstępu, tylko po odpartej fali (co 3 fale),
+   nigdy przy otwartym menu. Znikają po zakupie „Bez reklam” albo pakietu startowego.
+3. **Zakupy w aplikacji**: pakiet startowy (klejnoty + Lodowa kurtka + bez reklam), 3 paczki klejnotów, „Bez reklam”.
+4. Zgoda RODO przez Google UMP, przywracanie zakupów.
+
+Konfiguracja: `src/platform/config.ts`. Instrukcja podpięcia własnych kont jest w README.
 
 ## 8. Roadmapa
 
-- **Teraz:** 6 światów, 6 typów potworów + bossowie, kopalnia, Kuźnia, sklep, nagrody i misje dzienne, zapis gry, PL/EN, Android.
+- **Teraz:** 6 światów, 6 typów potworów + bossowie, kopalnia, Kuźnia, sklep, nagrody i misje dzienne, zapis gry, PL/EN, Android,
+  reklamy i zakupy, wieże specjalne (lodowa, ognista, armata), zwierzaki (lisek, sowa, smoczek), namioty, muzyka dla każdego świata,
+  ustawienia, samouczek, tryby grafiki z auto-dopasowaniem.
 - **Następnie:** reklamy z nagrodą i sklep z prawdziwymi płatnościami, muzyka dla każdego świata,
   ranking (najwyższa fala), osiągnięcia Google Play Games, ustawienia (grafika, dźwięk, reset).
 - **Później:** wydarzenia sezonowe, nowe typy wież (ogniste, lodowe), zwierzaki pomocnicy, klany.

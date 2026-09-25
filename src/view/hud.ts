@@ -6,9 +6,11 @@ import { formatNum, type Game } from '../game';
 import {
   BOOSTS, CHEST, GEMS, SKINS, STATS, UPGRADES, WORLDS, type Gem, type Levels, type Price, type Reward, type UpgradeId,
 } from '../data';
-import { DAILY_REWARDS } from '../profile';
+import { DAILY_REWARDS, type Quality, type Settings } from '../profile';
+import { PETS, type PetId } from '../data';
+import { PRODUCTS, type ProductId } from '../platform/config';
 import { T, fmt } from '../i18n';
-import { isMuted, setMuted, unlockAudio } from '../audio';
+import { unlockAudio } from '../audio';
 
 const GEM_CSS: Record<Gem, string> = { em: '#2ee87a', di: '#6fe8ff', ob: '#9b5cff' };
 
@@ -102,10 +104,40 @@ const CSS = `
 #hud .big { text-align: center; display: flex; flex-direction: column; gap: 10px; align-items: center; padding: 10px 0; }
 #hud .big .emoji { font-size: 64px; }
 #hud .big h3 { margin: 0; font-size: 26px; color: #ffd23f; }
+#hud .btn.ad { background: linear-gradient(#6aa8ff, #3b6fe0); box-shadow: 0 3px 0 #2a4fae; }
+#hud .btn.ad[disabled] { background: #45506e; box-shadow: 0 3px 0 #2e3650; color: #9aa6c4; }
+#hud .btns { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+#hud .tabs .tab { font-size: 12px; padding: 9px 2px; }
+#hud .tag { display: inline-block; font-size: 10px; background: #ffd23f; color: #3a2400; border-radius: 999px; padding: 1px 7px; margin-left: 6px; vertical-align: middle; }
+#hud .repair { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 110px); transform: translateX(-50%);
+  pointer-events: auto; display: none; font-size: 16px; }
+#hud .tut { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 28px); transform: translateX(-50%);
+  background: rgba(255,210,63,.95); color: #3a2400; border-radius: 18px; padding: 12px 18px; font-size: 16px; display: none;
+  max-width: calc(100vw - 32px); text-align: center; box-shadow: 0 4px 0 rgba(0,0,0,.2); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { transform: translateX(-50%) scale(1.04); } }
+#hud .hand { position: absolute; left: 50%; bottom: 30%; font-size: 54px; display: none; animation: swipe 1.6s ease-in-out infinite; }
+@keyframes swipe { 0% { transform: translate(-40px, 0); opacity: 0; } 20% { opacity: 1; } 80% { transform: translate(40px, -30px); opacity: 1; } 100% { opacity: 0; } }
+#hud .fps { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom) + 8px); font-size: 12px; background: rgba(20,32,52,.6); padding: 2px 8px; border-radius: 8px; display: none; }
+#hud .setrow { display: flex; align-items: center; justify-content: space-between; background: #26345a; border-radius: 14px; padding: 10px 12px; font-size: 15px; }
+#hud .setrow .btn { min-width: 96px; padding: 8px 12px; }
+#hud .danger { background: linear-gradient(#ff7a6b, #d93a2f); box-shadow: 0 3px 0 #9e2a20; }
 `;
 
 interface Floater { el: HTMLDivElement; pos: THREE.Vector3; t: number; }
-type Panel = 'forge' | 'shop' | 'daily' | 'quests' | 'world' | null;
+type Panel = 'forge' | 'shop' | 'daily' | 'quests' | 'world' | 'settings' | 'offline' | null;
+type ShopTab = 'gems' | 'skins' | 'pets' | 'boosts' | 'chests';
+
+/** Platform hooks the menus call into (ads, store, settings), provided by main. */
+export interface HudServices {
+  showRewarded(): Promise<boolean>;
+  purchase(id: ProductId): Promise<boolean>;
+  restore(): Promise<void>;
+  priceOf(id: ProductId): string;
+  billingAvailable: boolean;
+  applySettings(s: Settings, langChanged: boolean): void;
+  resetProgress(): void;
+  version: string;
+}
 
 const gemHtml = (g: Gem) => `<span class="gem" style="background:${GEM_CSS[g]}"></span>`;
 function priceHtml(p: Price, game: Game | null): string {
@@ -120,6 +152,10 @@ function priceHtml(p: Price, game: Game | null): string {
 
 export class Hud {
   onTravel: (() => void) | null = null;
+  svc: HudServices | null = null;
+  private offlineAmount = 0;
+  private resetArmed = false;
+  private busy = false;
   private game: Game | null = null;
   private root: HTMLElement;
   private els: Record<string, HTMLElement> = {};
@@ -128,7 +164,7 @@ export class Hud {
   private last: Record<string, string> = {};
   private v = new THREE.Vector3();
   private panel: Panel = null;
-  private shopTab: 'skins' | 'boosts' | 'chests' = 'skins';
+  private shopTab: ShopTab = 'gems';
   private panelKey = '';
   private forgeCooldown = 0;
 
@@ -157,7 +193,12 @@ export class Hud {
         <button class="round" data-act="shop">🛒</button>
         <button class="round" data-act="daily">📅</button>
         <button class="round" data-act="quests">📜</button>
+        <button class="round" data-act="settings">⚙️</button>
       </div>
+      <button class="btn ad repair" data-act="adRepair" data-v="repair"></button>
+      <div class="hand" data-v="hand">👆</div>
+      <div class="tut" data-v="tut"></div>
+      <div class="fps" data-v="fps"></div>
       <div class="hint" data-v="hint"></div>
       <div class="wave" data-v="waveBox"><span data-v="wave"></span><div class="bar"><i data-v="wall"></i></div>
         <div class="boss" data-v="bossBox"><span>👑 BOSS</span><div class="bar"><i data-v="bossHp"></i></div></div></div>
@@ -170,7 +211,7 @@ export class Hud {
     this.els.joy = this.root.querySelector('.joy')!;
     this.els.knob = this.root.querySelector('.joy i')!;
     this.els.mute = this.root.querySelector('[data-act="mute"]')!;
-    this.els.mute.textContent = isMuted() ? '🔇' : '🔊';
+
 
     this.root.addEventListener('pointerdown', (e) => {
       const target = e.target as HTMLElement;
@@ -188,6 +229,8 @@ export class Hud {
 
   setGame(g: Game): void {
     this.game = g;
+    const st = g.profile.settings;
+    this.els.mute.textContent = st.sfx || st.music ? '🔊' : '🔇';
     this.last = {};
     this.close();
   }
@@ -227,6 +270,28 @@ export class Hud {
 
   worldComplete(): void { this.open('world'); }
 
+  showFps(fps: number | null): void {
+    this.els.fps.style.display = fps === null ? 'none' : 'block';
+    if (fps !== null) this.els.fps.textContent = `${fps} FPS`;
+  }
+
+  showOffline(amount: number): void {
+    this.offlineAmount = amount;
+    if (!this.panel) this.open('offline');
+  }
+
+  /** Runs a rewarded ad and, if it was watched to the end, the reward. */
+  private async withAd(reward: () => void): Promise<void> {
+    if (this.busy || !this.svc) return;
+    this.busy = true;
+    try {
+      if (await this.svc.showRewarded()) reward();
+    } finally {
+      this.busy = false;
+      this.renderPanel();
+    }
+  }
+
   // ---------- menus ----------
 
   get menuOpen(): boolean { return this.panel !== null; }
@@ -245,17 +310,21 @@ export class Hud {
 
   private onPress(target: HTMLElement): void {
     const g = this.game;
-    if (target === this.els.overlay) { if (this.panel !== 'world') this.close(); return; }
+    if (target === this.els.overlay) { if (this.panel !== 'world' && this.panel !== 'offline') this.close(); return; }
     const btn = target.closest<HTMLElement>('[data-act]');
     if (!btn || !g) return;
     const act = btn.dataset.act!, arg = btn.dataset.arg ?? '';
     switch (act) {
-      case 'mute':
-        setMuted(!isMuted());
-        btn.textContent = isMuted() ? '🔇' : '🔊';
-        try { localStorage.setItem('frost-camp-muted', isMuted() ? '1' : '0'); } catch { /* ignore */ }
+      case 'mute': {
+        const st = g.profile.settings;
+        const on = !(st.sfx || st.music);
+        st.sfx = st.music = on;
+        this.svc?.applySettings(st, false);
+        btn.textContent = on ? '🔊' : '🔇';
         return;
-      case 'forge': case 'shop': case 'daily': case 'quests':
+      }
+      case 'forge': case 'shop': case 'daily': case 'quests': case 'settings':
+        this.resetArmed = false;
         if (this.panel === act) this.close(); else this.open(act);
         return;
       case 'close': this.close(); return;
@@ -274,6 +343,49 @@ export class Hud {
         break;
       }
       case 'quest': g.claimQuest(Number(arg)); break;
+      case 'pet': g.buyPet(arg as PetId); break;
+      case 'adBoost': void this.withAd(() => { g.adBoost(arg as 'cash' | 'speed' | 'chop'); this.showToast(T.got, T.boost[arg as 'cash']); }); return;
+      case 'adChest': void this.withAd(() => this.showToast(T.got, priceText(g.adChest()))); return;
+      case 'adDouble': void this.withAd(() => this.showToast(T.got, rewardText(g.doubleDaily()))); return;
+      case 'adRepair': void this.withAd(() => g.adRepair()); return;
+      case 'offline':
+        if (arg === 'ad') void this.withAd(() => { g.claimOffline(2); this.close(); });
+        else { g.claimOffline(1); this.close(); }
+        return;
+      case 'buy': {
+        const id = arg as ProductId;
+        if (this.busy || !this.svc) return;
+        this.busy = true;
+        void this.svc.purchase(id).then((ok) => {
+          this.busy = false;
+          if (ok) { g.grantProduct(id); this.showToast(T.got, T.product[id]); }
+          else if (!this.svc?.billingAvailable) this.showToast(T.storeOnlyApp);
+          this.renderPanel();
+        });
+        return;
+      }
+      case 'restore': void this.svc?.restore().then(() => this.renderPanel()); return;
+      case 'set': {
+        const st = g.profile.settings;
+        const before = st.lang;
+        if (arg === 'quality') {
+          const order: Quality[] = ['auto', 'low', 'medium', 'high'];
+          st.quality = order[(order.indexOf(st.quality) + 1) % order.length];
+        } else if (arg === 'lang') {
+          const order: Settings['lang'][] = ['auto', 'pl', 'en'];
+          st.lang = order[(order.indexOf(st.lang) + 1) % order.length];
+        } else {
+          const k = arg as 'sfx' | 'music' | 'vibration' | 'fps';
+          st[k] = !st[k];
+        }
+        this.svc?.applySettings(st, st.lang !== before);
+        g.onChange?.();
+        break;
+      }
+      case 'reset':
+        if (!this.resetArmed) { this.resetArmed = true; break; }
+        this.svc?.resetProgress();
+        return;
       case 'travel': this.close(); this.onTravel?.(); return;
     }
     this.renderPanel();
@@ -297,9 +409,31 @@ export class Hud {
             : `<button class="btn" disabled>${T.max}</button>`}</div>`;
       }).join('')}</div>`;
     } else if (this.panel === 'shop') {
-      const tab = (id: typeof this.shopTab, label: string) => `<button class="tab ${this.shopTab === id ? 'on' : ''}" data-act="tab" data-arg="${id}">${label}</button>`;
+      const tab = (id: ShopTab, label: string) => `<button class="tab ${this.shopTab === id ? 'on' : ''}" data-act="tab" data-arg="${id}">${label}</button>`;
       let body = '';
-      if (this.shopTab === 'skins') {
+      if (this.shopTab === 'gems') {
+        body = PRODUCTS.map((pr) => {
+          const owned = !pr.consumable && g.owns(pr.id);
+          const info = T.productInfo[pr.id] || '';
+          return `<div class="row"><div class="ic">${pr.icon}</div><div>
+            <div class="nm">${T.product[pr.id]}${pr.best ? `<span class="tag">${T.bestValue}</span>` : ''}</div>
+            ${info ? `<div class="info">${info}</div>` : ''}
+            <div class="cost">${priceHtml(pr.grant, null)}</div></div>
+            ${owned ? `<button class="btn" disabled>${T.bought}</button>`
+              : `<button class="btn gold" data-act="buy" data-arg="${pr.id}">${this.svc?.priceOf(pr.id) ?? ''}</button>`}</div>`;
+        }).join('') + `<button class="btn" data-act="restore">${T.restore}</button>`
+          + (this.svc?.billingAvailable ? '' : `<div class="note">${T.storeOnlyApp}</div>`);
+      } else if (this.shopTab === 'pets') {
+        body = `<div class="grid">${PETS.map((pt) => {
+          const owned = g.profile.pets.includes(pt.id), on = g.profile.pet === pt.id;
+          const icon = pt.id === 'fox' ? '🦊' : pt.id === 'owl' ? '🦉' : '🐉';
+          const btn = on ? `<button class="btn" data-act="pet" data-arg="${pt.id}">${T.petOn} ✓</button>`
+            : owned ? `<button class="btn" data-act="pet" data-arg="${pt.id}">${T.petTake}</button>`
+              : `<button class="btn gold" data-act="pet" data-arg="${pt.id}" ${g.canAfford(pt.price) ? '' : 'disabled'}>${T.buyBtn}</button>`;
+          return `<div class="card"><div style="font-size:40px">${icon}</div><div>${T.pet[pt.id]}</div>
+            <div class="info">${T.petInfo[pt.id]}</div>${owned ? '' : `<div class="cost">${priceHtml(pt.price, g)}</div>`}${btn}</div>`;
+        }).join('')}</div>`;
+      } else if (this.shopTab === 'skins') {
         body = `<div class="grid">${SKINS.map((s) => {
           const owned = g.profile.skins.includes(s.id), on = g.profile.skin === s.id;
           const c = '#' + new THREE.Color(s.color).getHexString(), t = '#' + new THREE.Color(s.trim).getHexString();
@@ -315,20 +449,25 @@ export class Hud {
           return `<div class="row"><div class="ic">${b.icon}</div><div><div class="nm">${T.boost[b.id]}</div>
             ${left > 0 ? `<div class="info">${fmt(T.active, { t: fmtTime(left) })}</div>` : ''}
             <div class="cost">${priceHtml(b.price, g)}</div></div>
-            <button class="btn gold" data-act="boost" data-arg="${b.id}" ${g.canAfford(b.price) ? '' : 'disabled'}>${T.buyBtn}</button></div>`;
+            <div class="btns"><button class="btn gold" data-act="boost" data-arg="${b.id}" ${g.canAfford(b.price) ? '' : 'disabled'}>${T.buyBtn}</button>
+            ${b.id === 'repair' ? '' : g.adReady(b.id)
+              ? `<button class="btn ad" data-act="adBoost" data-arg="${b.id}">${T.adFree}</button>`
+              : `<button class="btn ad" disabled>${fmtTime(g.adWait(b.id))}</button>`}</div></div>`;
         }).join('');
       } else {
         const ready = g.freeChestReady();
         const wait = Math.max(0, (g.profile.freeChestAt - g.now()) / 1000);
         body = `<div class="row"><div class="ic">🎁</div><div><div class="nm">${T.freeChest}</div>
             <div class="info">${ready ? '' : fmt(T.readyIn, { t: fmtTime(wait) })}</div></div>
-            <button class="btn" data-act="chest" data-arg="free" ${ready ? '' : 'disabled'}>${T.open}</button></div>
+            ${ready ? `<button class="btn" data-act="chest" data-arg="free">${T.open}</button>`
+              : g.adReady('chest') ? `<button class="btn ad" data-act="adChest">${T.adOpenNow}</button>`
+                : `<button class="btn" disabled>${T.open}</button>`}</div>
           <div class="row"><div class="ic">💎</div><div><div class="nm">${T.gemChest}</div>
             <div class="info">${gemHtml('em')} ${gemHtml('di')} ${gemHtml('ob')}</div>
             <div class="cost">${priceHtml(CHEST.price, g)}</div></div>
             <button class="btn gold" data-act="chest" data-arg="gem" ${g.canAfford(CHEST.price) ? '' : 'disabled'}>${T.open}</button></div>`;
       }
-      html = head(`🛒 ${T.shopTitle}`) + `<div class="tabs">${tab('skins', T.tabSkins)}${tab('boosts', T.tabBoosts)}${tab('chests', T.tabChests)}</div>
+      html = head(`🛒 ${T.shopTitle}`) + `<div class="tabs">${tab('gems', T.tabGems)}${tab('skins', T.tabSkins)}${tab('pets', T.tabPets)}${tab('boosts', T.tabBoosts)}${tab('chests', T.tabChests)}</div>
         <div class="pbody">${body}</div>`;
     } else if (this.panel === 'daily') {
       const idx = g.dailyIndex(), avail = g.dailyAvailable();
@@ -338,7 +477,8 @@ export class Hud {
         return `<div class="dayc ${done ? 'done' : ''} ${now ? 'now' : ''}"><div>${fmt(T.day, { n: i + 1 })}</div>
           <b>${done ? '✓' : rewardIcon(r)}</b><div>${rewardShort(r, g.world.priceMult)}</div></div>`;
       }).join('')}</div>
-        ${avail ? `<button class="btn gold" data-act="claimDaily">${T.claim}</button>` : `<div class="note">${T.comeBack}</div>`}</div>`;
+        ${avail ? `<button class="btn gold" data-act="claimDaily">${T.claim}</button>`
+          : `${g.canDoubleDaily() ? `<button class="btn ad" data-act="adDouble">${T.adDouble}</button>` : ''}<div class="note">${T.comeBack}</div>`}</div>`;
     } else if (this.panel === 'quests') {
       html = head(`📜 ${T.questsTitle}`) + `<div class="pbody">${g.profile.quests.list.map((q, i) => {
         const done = q.progress >= q.target;
@@ -349,6 +489,22 @@ export class Hud {
           ${q.claimed ? `<button class="btn" disabled>${T.claimed}</button>`
             : `<button class="btn gold" data-act="quest" data-arg="${i}" ${done ? '' : 'disabled'}>${T.claim}</button>`}</div>`;
       }).join('')}</div>`;
+    } else if (this.panel === 'settings') {
+      const st = g.profile.settings;
+      const row = (label: string, key: string, value: string) =>
+        `<div class="setrow"><span>${label}</span><button class="btn" data-act="set" data-arg="${key}">${value}</button></div>`;
+      const onOff = (b: boolean) => (b ? T.on : T.off);
+      html = head(`⚙️ ${T.settingsTitle}`) + `<div class="pbody">
+        ${row(T.sMusic, 'music', onOff(st.music))}${row(T.sSfx, 'sfx', onOff(st.sfx))}${row(T.sVibration, 'vibration', onOff(st.vibration))}
+        ${row(T.sQuality, 'quality', T.quality[st.quality])}${row(T.sFps, 'fps', onOff(st.fps))}
+        ${row(T.sLang, 'lang', st.lang === 'auto' ? T.quality.auto : st.lang.toUpperCase())}
+        <button class="btn danger" data-act="reset">${this.resetArmed ? T.resetConfirm : T.reset}</button>
+        <div class="note">${T.version} ${this.svc?.version ?? ''}</div></div>`;
+    } else if (this.panel === 'offline') {
+      html = head(`🌙 ${T.offlineTitle}`, false) + `<div class="big"><div class="note">${T.offlineText}</div>
+        <h3>+$${formatNum(this.offlineAmount)}</h3>
+        <button class="btn ad" data-act="offline" data-arg="ad">${T.adDouble}</button>
+        <button class="btn" data-act="offline" data-arg="1">${T.collect}</button></div>`;
     } else if (this.panel === 'world') {
       const next = WORLDS[(g.profile.world + 1) % WORLDS.length].id;
       html = head(`🌍 ${T.worldDone}`, false) + `<div class="big"><div class="emoji">🌀</div>
@@ -364,7 +520,8 @@ export class Hud {
     const g = this.game;
     if (!g) return '';
     const p = g.profile;
-    return [this.panel, this.shopTab, Math.floor(g.money), JSON.stringify(p.gems), JSON.stringify(p.levels), p.skin, p.skins.length,
+    return [this.panel, this.shopTab, this.resetArmed, JSON.stringify(p.settings), p.pet, p.pets.length, p.owned.length, p.dailyDoubled,
+      Math.ceil(g.adWait('cash')), Math.ceil(g.adWait('speed')), Math.ceil(g.adWait('chop')), g.adReady('chest'), Math.floor(g.money), JSON.stringify(p.gems), JSON.stringify(p.levels), p.skin, p.skins.length,
       Math.ceil(g.boostLeft('cash')), Math.ceil(g.boostLeft('speed')), Math.ceil(g.boostLeft('chop')),
       Math.ceil((p.freeChestAt - g.now()) / 1000), p.daily.last, JSON.stringify(p.quests.list.map((q) => [q.progress, q.claimed]))].join('|');
   }
@@ -413,7 +570,19 @@ export class Hud {
     dot('shop', g.freeChestReady());
 
     // keep an open menu's buttons in sync with money and timers
-    if (this.panel && this.panel !== 'world' && this.stateKey() !== this.panelKey) this.renderPanel();
+    if (this.panel && this.panel !== 'world' && this.panel !== 'offline' && this.stateKey() !== this.panelKey) this.renderPanel();
+
+    // watch-an-ad palisade repair while monsters are inside
+    const canRepair = g.canAdRepair();
+    this.els.repair.style.display = canRepair && !this.panel ? 'block' : 'none';
+    if (canRepair) set('repair', T.adRepair);
+
+    // first-run tutorial
+    const step = g.profile.tutorial;
+    const tut = step < 99 && !this.panel ? T.tut[Math.min(step, T.tut.length - 1)] : '';
+    this.els.tut.style.display = tut ? 'block' : 'none';
+    if (tut) set('tut', `👉 ${tut}`);
+    this.els.hand.style.display = step === 0 && !input.joy.active ? 'block' : 'none';
 
     this.toastT += dt;
     this.els.toast.style.opacity = this.toastT < 2.6 ? '1' : '0';

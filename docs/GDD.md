@@ -1,106 +1,83 @@
-# Stack Island — dokument projektowy gry (GDD)
+# Frost Camp — dokument projektowy gry (GDD)
 
 ## 1. Pomysł w jednym zdaniu
 
-Rozbudowujesz bezludną wyspę: ścinasz, kopiesz i nosisz surowce w **coraz wyższej wieży na plecach**,
-budujesz targ, tartak, mosty i latarnię, a pracownicy zarabiają za ciebie nawet wtedy, gdy nie grasz.
+Prowadzisz zaśnieżony obóz ocalałych: ścinasz sosny wirującymi toporami, nosisz **coraz wyższy stos bali**
+na ladę, ocaleni płacą za drewno, a za zarobione 💵 stawiasz wieże z kuszami i bronisz palisady przed falami polarnych niedźwiedzi.
 
-**Gatunek:** idle arcade / hybrid-casual („collect & stack”). To jedna z najpopularniejszych kategorii w Google Play:
-proste sterowanie jednym palcem, ciągłe poczucie postępu i dużo satysfakcji z „ASMR” zbierania.
-Podobne gry: *My Mini Mart*, *Lumber Inc*, *Idle Island*, *Pizza Ready*, *My Perfect Hotel*.
+**Gatunek:** hybrid-casual — *idle arcade („collect & stack”)* + lekki *tower defense*.
+Podobne gry: *Frozen City / Whiteout Survival* (reklamy), *My Mini Mart*, *Lumber Inc*, *Survivor Base*.
+Mechanika i klimat wzorowane na krótkich filmikach z TikToka (chodzisz, zbierasz, kolejka klientów, pola za $, obrona przed zwierzętami).
 
-## 2. Główna pętla (core loop)
+## 2. Główna pętla
 
 ```
-zbierz surowce ──► stos rośnie na plecach ──► zanieś na pole budowy / sprzedaj na targu
-      ▲                                                     │
-      └── ulepszenia (plecak, buty, siekiera), pracownicy ◄─┘ monety
+las ──► topory ścinają sosny ──► stos bali w rękach ──► lada ──► ocaleni kupują ──► 💵 na stosie
+ ▲                                                                                   │
+ └──── ulepszenia: +topór, większy stos, buty, drwale, palisada, wieże ◄─────────────┘
+                     ▲
+     co ~minutę fala niedźwiedzi atakuje palisadę → wieże strzelają, gracz może wyjść i walczyć toporami
 ```
 
-- **Zbieranie jest automatyczne:** wystarczy stanąć obok drzewa lub skały.
-- **Oddawanie też:** wchodzisz na pole budowy, a przedmioty same „lecą” ze stosu.
-- **Ulepszenia kupujesz, stojąc** na polu (przebiegnięcie przez nie niczego nie kupuje).
-- **Strzałka i podpowiedź** u góry ekranu cały czas mówią, co zrobić dalej (tutorial bez tekstu do czytania).
+- **Zbieranie jest automatyczne:** topory krążą wokół postaci i same ścinają drzewa w zasięgu.
+- **Oddawanie też:** wchodzisz w strefę za ladą, bale same lecą na blat. Pierwszy z kolejki zabiera tyle, ile chce (dymek z ikoną bala), płaci i odchodzi.
+- **Pola zakupu za $** (ramki w stylu z filmików) kupujesz, **stojąc** na nich, bo przebiegnięcie przez pole niczego nie kupuje.
+- **Strzałka i podpowiedź** u góry mówią, co zrobić dalej.
 
-## 3. Progresja (wyspa 1)
+## 3. Obrona
 
-| # | Budynek | Koszt | Co odblokowuje |
+- Fale niedźwiedzi co ok. 60 s (pierwsza po 90 s). Z każdą falą jest ich więcej i są silniejsze.
+- Niedźwiedzie idą pod wschodnią palisadę i ją biją (pasek u góry ekranu). Wieże z kuszami strzelają automatycznie.
+- Palisada zniszczona → niedźwiedzie wchodzą do obozu i gonią gracza. Trafienie odrzuca gracza i zabiera mu 3 bale.
+- Gracz może wyjść bramą i walczyć: wirujące topory ranią niedźwiedzie. Zabity niedźwiedź zostawia paczkę 💵.
+- Po odparciu fali palisada sama się naprawia. **Nie ma przegranej** — porażka kosztuje tylko czas i drewno (casual).
+
+## 4. Ulepszenia
+
+| Pole | Efekt | Koszt | Odblokowanie |
 |---|---|---|---|
-| 1 | Targ | 10 drewna | sprzedaż surowców → monety; pola ulepszeń |
-| 2 | Plecak (1. ulepszenie) | 20 🪙 | +5 miejsca na stosie (tutorial ulepszeń) |
-| 3 | Most | 20 drewna + 30 🪙 | wyspa z kamieniołomem |
-| 4 | Tartak | 15 drewna + 25 kamienia + 60 🪙 | drewno → deski (automatycznie) |
-| 5 | Chata drwali | 20 drewna + 15 kamienia + 80 🪙 | zatrudnianie pracowników |
-| 6 | Pracownik (1.) | 60 🪙 | pracownik sam ścina drzewa i sprzedaje drewno |
-| 7 | Most 2 | 30 kamienia + 15 desek + 150 🪙 | wyspa ze złotem |
-| 8 | **Latarnia** | 40 kamienia + 30 desek + 20 złota + 250 🪙 | koniec wyspy 1 🎉 |
+| Wieża z kuszą ×4 | automatyczna obrona | 20 / 120 / 400 / 900 | kolejno |
+| +1 topór (maks. 4) | szybsze ścinanie, większe obrażenia | 60 → ×2,4 | po 1. wieży |
+| Większy stos | +4 bale (start 8) | 40 → ×1,7 | po 1. wieży |
+| Drwal (maks. 3) | sam ścina i nosi drewno na ladę | 180 → ×2,2 | po 2. wieży |
+| Mocniejsza palisada | +60 HP (start 100) | 120 → ×1,7 | po 2. wieży |
+| Szybsze buty | +0,6 prędkości | 60 → ×1,7 | po 2. wieży |
+| Moc wież | +30% obrażeń | 250 → ×1,8 | po 3. wieży |
 
-**Ulepszenia** (koszt rośnie wykładniczo, wzory w `src/data.ts`):
+Cena bala u ocalałych: 5 💵. Wszystkie liczby są w `src/data.ts`.
 
-| Ulepszenie | Efekt / poziom | Maks. poziom |
-|---|---|---|
-| Plecak | +5 miejsca (start: 10) | 13 |
-| Buty | +18 prędkości | 11 |
-| Siekiera | −13% czasu zbierania | 11 |
-| Pracownicy | +1 pracownik | 4 |
+**Tempo (sprawdzone symulacją, bot gra 30 min):** pierwsza wieża po ok. 15 s, czwarta wieża po ok. 22–28 min.
+Palisada pada 2–3 razy na 30 minut (dopiero od ok. 13. fali), więc napięcie jest, ale gra nie frustruje.
 
-**Wartość surowców na targu:** drewno 2, kamień 3, deski 6, złoto 15.
+## 5. Monetyzacja (do dodania przed premierą)
 
-**Tempo gry:** bot, który tylko podąża za strzałką i nie kupuje dodatkowych ulepszeń, kończy wyspę 1 w **~30 min**.
-Żywy gracz, który ulepsza plecak i siekierę, zrobi to szybciej. To dobra długość pierwszej sesji dla tego gatunku.
+1. **Reklamy z nagrodą** (główny przychód): „podwój zarobki offline”, „2× prędkość na 3 min”,
+   „natychmiast napraw palisadę” w trakcie fali, „darmowa wieża na 1 falę”.
+2. **Reklamy pełnoekranowe:** najwyżej co 3–4 min, np. po odpartej fali, nigdy w trakcie zbierania.
+3. **Zakupy w aplikacji:** „Usuń reklamy”, „Pakiet startowy” (💵 + drwal), skórki kurtek i toporów.
 
-**Zarobki offline:** każdy pracownik daje ok. 0,1 🪙/s, gdy gra jest zamknięta (limit 2 h).
-Pieniądze czekają na stosie przy targu, a po powrocie gracz widzi komunikat „Witaj z powrotem! +X”.
+Technicznie: AdMob (`@capacitor-community/admob`) + Google Play Billing (np. RevenueCat).
+W UE potrzebna polityka prywatności i okno zgody (UMP/GDPR).
 
-## 4. Monetyzacja (do dodania przed premierą)
+## 6. Retencja
 
-Model **F2P z reklamami + drobne zakupy**, standard dla hybrid-casual:
+- ✅ zarobki offline od drwali (do 2 h),
+- ✅ licznik fal jako „wynik” do bicia,
+- codzienna nagroda, misje („odeprzyj 5 fal”, „sprzedaj 200 bali”),
+- nowe obozy/mapy z innymi zagrożeniami (wilki, yeti jako boss),
+- powiadomienie „Twoi drwale zarobili 500 💵!”.
 
-1. **Reklamy z nagrodą (rewarded).** Tu jest główny przychód, a gracz sam decyduje, czy obejrzeć:
-   - „Podwój zarobki offline” w okienku powitalnym,
-   - „2× prędkość / 2× plecak na 3 minuty”,
-   - „Natychmiast ukończ budowę” przy dużych budynkach.
-2. **Reklamy pełnoekranowe (interstitial):** najwyżej co 3–4 minuty i nigdy w trakcie zbierania,
-   np. po ukończeniu budynku. Nie wcześniej niż po 5 minutach pierwszej sesji.
-3. **Zakupy w aplikacji:** „Usuń reklamy” (~15–20 zł), „Pakiet startowy” (monety + stały +50% prędkości),
-   skórki postaci.
+## 7. Roadmapa
 
-Technicznie: AdMob przez `@capacitor-community/admob`, płatności przez Google Play Billing
-(np. `cordova-plugin-purchase` / RevenueCat). Wymaga polityki prywatności i okna zgody (UMP/GDPR) w UE.
+**MVP (to repo):** obóz 3D, las, kolejka ocalałych, 10 typów pól, 4 wieże, fale niedźwiedzi, drwale, zapis, offline, PL/EN, dźwięk, projekt Android z ikoną.
 
-## 5. Retencja: żeby gracze wracali
+**v0.2 przed premierą:** reklamy z nagrodą + zgoda GDPR, analityka (Firebase: lejek pierwszych budów, retencja D1/D7),
+muzyka, ekran ustawień, optymalizacja na słabsze telefony (tryb bez cieni).
 
-- ✅ zarobki offline (już działają),
-- codzienna nagroda (7-dniowa seria),
-- kolejne wyspy z nowymi surowcami i maszynami (to rdzeń contentu),
-- misje typu „sprzedaj 100 desek” z nagrodami,
-- powiadomienie push „Twoi pracownicy zarobili 500 monet!” (po 4–8 h).
+**v0.3+:** druga mapa, boss co 10 fal, skórki, rozbudowa obozu (namioty → nowi klienci z innymi zamówieniami, np. deski z tartaku).
 
-## 6. Roadmapa
+## 8. Marketing
 
-**MVP (to repo):** wyspa 1, 3 obszary, 4 surowce, targ, tartak, pracownicy, 4 ulepszenia, zapis gry, offline, PL/EN, dźwięk, projekt Android.
-
-**v0.2 przed premierą:**
-- reklamy z nagrodą + zgoda GDPR, polityka prywatności,
-- analityka (Firebase Analytics): lejek tutorialu, czas do każdego budynku, retencja D1/D7,
-- lepsza ikona i grafiki do sklepu, muzyka w tle,
-- ekran ustawień (dźwięk, wibracje, reset postępu).
-
-**v0.3+:**
-- wyspa 2 (np. pustynia: kaktusy → włókno, huta szkła) i przeprawa promem,
-- menedżerowie automatyzujący tartak i transport,
-- skórki postaci, zwierzak zbierający monety,
-- wydarzenia sezonowe.
-
-## 7. Marketing
-
-Ten gatunek dobrze się sprzedaje przez **krótkie wideo (TikTok, Reels, Shorts)**: ogromna wieża przedmiotów
-na plecach, „satysfakcjonujące” zbieranie, szybkie time-lapse’y rozbudowy wyspy. Warto nagrywać je od
-pierwszej grywalnej wersji i sprawdzać, które motywy dają najtańsze instalacje (CPI), zanim wyda się dużo na content.
-
-## 8. Wskaźniki do obserwowania w teście zamkniętym
-
-- % graczy, którzy zbudowali Targ (cel: > 90%) i Most (cel: > 70%),
-- retencja D1 > 35%, D7 > 12%,
-- średnia długość sesji > 8 min,
-- gdzie gracze odpadają: zdarzenie analityczne przy każdej budowie i ulepszeniu.
+Ten gatunek sprzedaje się **krótkimi filmikami (TikTok, Reels, Shorts)**: wirujące topory kosiące las,
+kolejka Mikołajów, fala niedźwiedzi rozbijająca się o palisadę, kusze strzelające seriami.
+Warto nagrywać je od pierwszej grywalnej wersji i testować, które motywy dają najtańsze instalacje.

@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Stack Island</string>
-    <string name="title_activity_main">Stack Island</string>
+    <string name="app_name">Frost Camp</string>
+    <string name="title_activity_main">Frost Camp</string>
     <string name="package_name">com.orderglide.stackisland</string>
     <string name="custom_url_scheme">com.orderglide.stackisland</string>
 </resources>

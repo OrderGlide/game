@@ -1,108 +1,111 @@
-// Static game data: world layout, resources, costs, balancing.
+// Static game data: camp layout, costs and balancing. World units ≈ meters.
+// Axes: x → right, z → toward the camera (down on screen), y → up.
 
-export type Res = 'wood' | 'stone' | 'plank' | 'gold';
-export type CostKey = Res | 'coin';
-export type Cost = Partial<Record<CostKey, number>>;
+export interface Box { x: number; z: number; w: number; d: number; } // center-based, w along x, d along z
+export interface Pt { x: number; z: number; }
 
-/** Center-based rectangle. */
-export interface Rect { x: number; y: number; w: number; h: number; }
+/** Inner camp area; the palisade runs along its border. */
+export const CAMP = { half: 8.5 };
 
-export const RESOURCES: Res[] = ['wood', 'stone', 'plank', 'gold'];
-export const COST_KEYS: CostKey[] = ['wood', 'stone', 'plank', 'gold', 'coin'];
-
-/** Coins paid by the market per item. */
-export const RES_VALUE: Record<Res, number> = { wood: 2, stone: 3, plank: 6, gold: 15 };
-
-export type NodeKind = 'tree' | 'rock' | 'gold';
-export const NODE_INFO: Record<NodeKind, { res: Res; hp: number; respawn: number }> = {
-  tree: { res: 'wood', hp: 3, respawn: 9 },
-  rock: { res: 'stone', hp: 4, respawn: 12 },
-  gold: { res: 'gold', hp: 3, respawn: 16 },
+export const GATES = {
+  north: { x: -4.5, z: -CAMP.half, half: 1.6 }, // to the forest
+  east: { x: CAMP.half, z: 0, half: 1.6 }, // to the snowfield (bears)
 };
 
-export type IslandId = 'A' | 'B' | 'C';
-export const ISLANDS: (Rect & { id: IslandId; unlockedBy?: PlotId })[] = [
-  { id: 'A', x: 0, y: 0, w: 800, h: 800 },
-  { id: 'B', x: 920, y: 0, w: 800, h: 800, unlockedBy: 'bridgeAB' },
-  { id: 'C', x: 920, y: 920, w: 800, h: 800, unlockedBy: 'bridgeBC' },
-];
+/** Serving counter built into the south palisade; survivors queue outside it. */
+export const COUNTER: Box = { x: -3, z: CAMP.half, w: 4, d: 1.1 };
+export const DEPOSIT_ZONE: Box = { x: -3, z: 6.9, w: 3.8, d: 1.9 };
+export const CASH_ZONE: Box = { x: -6.4, z: 6.5, w: 2.2, d: 2.2 };
+export const COUNTER_MAX = 40;
 
-export const BRIDGES: (Rect & { id: PlotId })[] = [
-  { id: 'bridgeAB', x: 460, y: 0, w: 180, h: 76 },
-  { id: 'bridgeBC', x: 920, y: 460, w: 76, h: 180 },
-];
+export const QUEUE = { x: -3, z: 9.8, gap: 1.25, size: 8, spawnZ: 26, pricePerLog: 5 };
 
-export type PlotId =
-  | 'market' | 'bridgeAB' | 'hut' | 'sawmill' | 'bridgeBC' | 'lighthouse'
-  | 'upCap' | 'upSpeed' | 'upHarvest' | 'upHire';
+export const FOREST: Box = { x: -10, z: -20, w: 28, d: 18 }; // x -24..4, z -29..-11
+export const TREE = { hp: 2, respawn: 14, spacing: 2.3 };
 
-export type UpgradeId = 'upCap' | 'upSpeed' | 'upHarvest' | 'upHire';
+export const WORLD = { minX: -26, maxX: 32, minZ: -31, maxZ: 24 };
 
-export interface PlotDef extends Rect {
-  id: PlotId;
-  requires: PlotId[];
-  /** Fixed cost for buildings; upgrades compute cost from level. */
-  cost?: Cost;
+export const PLAYER = {
+  start: { x: -2, z: 3 },
+  radius: 0.45,
+  speed: (lvl: number) => 6 + 0.6 * lvl,
+  capacity: (lvl: number) => 8 + 4 * lvl,
+  chopInterval: (axes: number) => 0.5 * 0.85 ** (axes - 1),
+  axeReach: 2.1,
+  axeDps: (axes: number) => 16 * axes,
+};
+
+export const WORKER = { carry: 4, speed: 3.6, chopTime: 0.9 };
+
+export const BEAR = {
+  speed: 2.3,
+  hp: (wave: number) => Math.round(35 * 1.08 ** (wave - 1)),
+  count: (wave: number) => 2 + Math.floor((wave - 1) * 0.6),
+  wallDamage: 4,
+  attackEvery: 1.5,
+  aggro: 7,
+  reward: (wave: number) => 5 + 2 * wave,
+};
+
+export const wallMax = (level: number) => 100 + 60 * level;
+export const FIRST_WAVE_IN = 90;
+export const WAVE_GAP = 60;
+
+export const TOWER = { range: 14.5, every: 1.2, damage: 14, boltSpeed: 28 };
+
+export type PadId = 'tower1' | 'tower2' | 'tower3' | 'tower4' | 'axe' | 'bag' | 'boots' | 'worker' | 'power' | 'wall';
+export type PadIcon = 'tower' | 'axe' | 'bag' | 'boots' | 'worker' | 'power' | 'wall';
+
+export interface PadDef {
+  id: PadId; x: number; z: number; icon: PadIcon;
+  /** Pads needing all of these bought at least once before they appear. */
+  requires: PadId[];
+  max: number;
+  cost: (level: number) => number;
 }
 
-export const PLOTS: PlotDef[] = [
-  { id: 'market', x: 270, y: 195, w: 130, h: 90, requires: [], cost: { wood: 10 } },
-  { id: 'upCap', x: -130, y: 300, w: 86, h: 76, requires: ['market'] },
-  { id: 'upSpeed', x: 0, y: 300, w: 86, h: 76, requires: ['market'] },
-  { id: 'upHarvest', x: 130, y: 300, w: 86, h: 76, requires: ['market'] },
-  { id: 'bridgeAB', x: 340, y: 0, w: 90, h: 100, requires: ['market'], cost: { wood: 20, coin: 30 } },
-  { id: 'hut', x: -250, y: 215, w: 120, h: 90, requires: ['bridgeAB'], cost: { wood: 20, stone: 15, coin: 80 } },
-  { id: 'upHire', x: -250, y: 320, w: 90, h: 64, requires: ['hut'] },
-  { id: 'sawmill', x: 760, y: 110, w: 140, h: 90, requires: ['bridgeAB'], cost: { wood: 15, stone: 25, coin: 60 } },
-  { id: 'bridgeBC', x: 920, y: 340, w: 90, h: 90, requires: ['sawmill'], cost: { stone: 30, plank: 15, coin: 150 } },
-  { id: 'lighthouse', x: 760, y: 1070, w: 150, h: 150, requires: ['bridgeBC'], cost: { stone: 40, plank: 30, gold: 20, coin: 250 } },
+export const PADS: PadDef[] = [
+  { id: 'tower1', x: 5.6, z: -5.2, icon: 'tower', requires: [], max: 1, cost: () => 20 },
+  { id: 'axe', x: 2.8, z: 1.2, icon: 'axe', requires: ['tower1'], max: 3, cost: (l) => Math.round(60 * 2.4 ** l) },
+  { id: 'tower2', x: 5.6, z: 3.8, icon: 'tower', requires: ['tower1'], max: 1, cost: () => 120 },
+  { id: 'bag', x: 0.3, z: -3, icon: 'bag', requires: ['tower1'], max: 8, cost: (l) => Math.round(40 * 1.7 ** l) },
+  { id: 'worker', x: -6.4, z: 1.5, icon: 'worker', requires: ['tower2'], max: 3, cost: (l) => Math.round(180 * 2.2 ** l) },
+  { id: 'wall', x: 0.1, z: 0.8, icon: 'wall', requires: ['tower2'], max: 8, cost: (l) => Math.round(120 * 1.7 ** l) },
+  { id: 'boots', x: 2.8, z: -3, icon: 'boots', requires: ['tower2'], max: 8, cost: (l) => Math.round(60 * 1.7 ** l) },
+  { id: 'tower3', x: 1.5, z: -6.3, icon: 'tower', requires: ['tower2', 'axe'], max: 1, cost: () => 400 },
+  { id: 'power', x: 0.3, z: 3.6, icon: 'power', requires: ['tower3'], max: 6, cost: (l) => Math.round(250 * 1.8 ** l) },
+  { id: 'tower4', x: 5.6, z: 6.6, icon: 'tower', requires: ['tower3'], max: 1, cost: () => 900 },
 ];
 
-/** Order in which the guide arrow walks the player through the game (upgrades: first purchase only). */
-export const MAIN_ORDER: PlotId[] = ['market', 'upCap', 'bridgeAB', 'sawmill', 'hut', 'upHire', 'bridgeBC', 'lighthouse'];
+/** Order the guide arrow suggests first purchases in. */
+export const PAD_ORDER: PadId[] = ['tower1', 'axe', 'tower2', 'bag', 'worker', 'wall', 'tower3', 'boots', 'power', 'tower4'];
 
-export const UPGRADES: Record<UpgradeId, { max: number; cost: (lvl: number) => number }> = {
-  upCap: { max: 12, cost: (l) => Math.round(20 * 1.55 ** l) },
-  upSpeed: { max: 10, cost: (l) => Math.round(25 * 1.6 ** l) },
-  upHarvest: { max: 10, cost: (l) => Math.round(25 * 1.6 ** l) },
-  upHire: { max: 4, cost: (l) => Math.round(60 * 1.9 ** l) },
-};
+export const PAD_SIZE = 2.3;
 
-export const stats = {
-  capacity: (lvl: number) => 10 + 5 * lvl,
-  speed: (lvl: number) => 175 + 18 * lvl,
-  harvestInterval: (lvl: number) => 0.42 * 0.87 ** lvl,
-};
+export function inBox(x: number, z: number, b: Box, pad = 0): boolean {
+  return Math.abs(x - b.x) <= b.w / 2 + pad && Math.abs(z - b.z) <= b.d / 2 + pad;
+}
 
-// Zones attached to buildings once they are built.
-export const ZONES = {
-  marketSell: { x: 235, y: 295, w: 70, h: 60 },
-  marketCash: { x: 315, y: 295, w: 64, h: 60 },
-  sawIn: { x: 705, y: 195, w: 74, h: 60 },
-  sawOut: { x: 815, y: 195, w: 74, h: 60 },
-} satisfies Record<string, Rect>;
+export function inCamp(x: number, z: number): boolean {
+  return Math.abs(x) < CAMP.half && Math.abs(z) < CAMP.half;
+}
 
-export const SAW_IN_MAX = 30;
-export const SAW_OUT_MAX = 40;
-export const SAW_TIME = 1.1;
-
-export const WORKER = { carry: 6, speed: 125, chopTime: 0.7 };
-
-export const PLAYER_START = { x: 0, y: 170 };
-
-/** Regions filled with resource nodes (seeded jittered grid). */
-export const NODE_REGIONS: { kind: NodeKind; island: IslandId; rect: Rect; spacing: number }[] = [
-  { kind: 'tree', island: 'A', rect: { x: -215, y: -130, w: 310, h: 500 }, spacing: 66 },
-  { kind: 'tree', island: 'A', rect: { x: 175, y: -240, w: 300, h: 260 }, spacing: 66 },
-  { kind: 'rock', island: 'B', rect: { x: 920, y: -230, w: 720, h: 280 }, spacing: 76 },
-  { kind: 'tree', island: 'B', rect: { x: 1165, y: 235, w: 230, h: 270 }, spacing: 66 },
-  { kind: 'rock', island: 'C', rect: { x: 700, y: 640, w: 320, h: 220 }, spacing: 76 },
-  { kind: 'gold', island: 'C', rect: { x: 1150, y: 800, w: 240, h: 460 }, spacing: 80 },
-  { kind: 'tree', island: 'C', rect: { x: 1110, y: 1205, w: 340, h: 170 }, spacing: 66 },
-];
-
-export function inRect(px: number, py: number, r: Rect, pad = 0): boolean {
-  return Math.abs(px - r.x) <= r.w / 2 + pad && Math.abs(py - r.y) <= r.h / 2 + pad;
+/** Palisade pieces as boxes, with openings for the gates and the counter. */
+export function fenceBoxes(): Box[] {
+  const h = CAMP.half, t = 0.7, out: Box[] = [];
+  const seg = (a: number, b: number, fixed: number, horiz: boolean) => {
+    if (b - a <= 0) return;
+    out.push(horiz ? { x: (a + b) / 2, z: fixed, w: b - a, d: t } : { x: fixed, z: (a + b) / 2, w: t, d: b - a });
+  };
+  const n = GATES.north, e = GATES.east;
+  seg(-h, n.x - n.half, -h, true);
+  seg(n.x + n.half, h, -h, true);
+  seg(-h, COUNTER.x - COUNTER.w / 2, h, true);
+  seg(COUNTER.x + COUNTER.w / 2, h, h, true);
+  seg(-h, h, -h, false);
+  seg(-h, e.z - e.half, h, false);
+  seg(e.z + e.half, h, h, false);
+  return out;
 }
 
 export function mulberry32(seed: number): () => number {

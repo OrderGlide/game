@@ -1,6 +1,6 @@
 // Tiny WebAudio synth — no audio files needed.
 
-type Sfx = 'pick' | 'drop' | 'coin' | 'build' | 'chop' | 'upgrade';
+type Sfx = 'pick' | 'drop' | 'coin' | 'build' | 'chop' | 'upgrade' | 'hit' | 'shoot' | 'bear' | 'thud' | 'hurt';
 
 let ctx: AudioContext | null = null;
 let muted = false;
@@ -44,6 +44,11 @@ export function sfx(name: Sfx): void {
     case 'coin': tone(1180 * jitter, 0.06, 'square', 0.04); tone(1560 * jitter, 0.08, 'square', 0.035, 0.04); break;
     case 'chop': tone(160 * jitter, 0.06, 'sawtooth', 0.06, 0, -60); break;
     case 'upgrade': [523, 659, 784].forEach((f, i) => tone(f, 0.12, 'triangle', 0.12, i * 0.06)); break;
+    case 'hit': tone(220 * jitter, 0.07, 'square', 0.05, 0, -90); break;
+    case 'shoot': tone(900 * jitter, 0.09, 'triangle', 0.06, 0, -500); break;
+    case 'bear': tone(120 * jitter, 0.35, 'sawtooth', 0.08, 0, -50); tone(90 * jitter, 0.3, 'square', 0.04, 0.05); break;
+    case 'thud': tone(90 * jitter, 0.12, 'triangle', 0.14, 0, -40); break;
+    case 'hurt': tone(300, 0.15, 'sawtooth', 0.08, 0, -200); break;
     case 'build': [392, 523, 659, 784, 1046].forEach((f, i) => tone(f, 0.18, 'triangle', 0.14, i * 0.07)); break;
   }
 }

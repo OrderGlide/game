@@ -1,54 +1,52 @@
-import type { PlotId, Res } from './data';
+import type { PadId } from './data';
 
 const pl = {
-  plot: {
-    market: 'Targ', bridgeAB: 'Most', hut: 'Chata drwali', sawmill: 'Tartak', bridgeBC: 'Most',
-    lighthouse: 'Latarnia', upCap: 'Plecak', upSpeed: 'Buty', upHarvest: 'Siekiera', upHire: 'Zatrudnij',
-  } as Record<PlotId, string>,
-  res: { wood: 'drewno', stone: 'kamień', plank: 'deski', gold: 'złoto' } as Record<Res, string>,
-  collect: 'Zbierz: {r}',
-  build: 'Zbuduj: {b}',
-  upgrade: 'Ulepsz: {b}',
-  hire: 'Zatrudnij pracownika',
-  sell: 'Sprzedaj surowce na targu',
-  takeCash: 'Odbierz monety',
-  feedSaw: 'Wrzuć drewno do tartaku',
-  takePlanks: 'Odbierz deski z tartaku',
+  pad: {
+    tower1: 'Wieża z kuszą', tower2: 'Wieża z kuszą', tower3: 'Wieża z kuszą', tower4: 'Wieża z kuszą',
+    axe: '+1 topór', bag: 'Większy stos', boots: 'Szybsze buty', worker: 'Drwal', power: 'Moc wież', wall: 'Mocniejsza palisada',
+  } as Record<PadId, string>,
+  chop: 'Zetnij drzewa w lesie',
+  deliver: 'Zanieś drewno na ladę',
+  takeCash: 'Zbierz pieniądze',
+  buy: 'Kup: {b}',
+  defend: 'Niedźwiedzie! Broń obozu',
+  breach: 'Niedźwiedzie wdarły się do obozu!',
+  free: 'Rozbudowuj obóz',
   full: 'MAX',
-  lvl: 'Poz.',
+  wave: 'Fala {n}',
+  waveIn: 'Fala {n} za {t}',
+  bearsLeft: '🐻 {n}',
+  wall: 'Palisada',
   welcome: 'Witaj z powrotem!',
-  win: 'Wyspa ukończona!',
-  winSub: 'Latarnia świeci. Dotknij, aby grać dalej',
-  explore: 'Rozbudowuj i ulepszaj!',
-  built: 'Zbudowano!',
+  waveCleared: 'Fala odparta!',
+  waveStart: 'Nadciągają niedźwiedzie!',
 };
 
 type Dict = typeof pl;
 
 const en: Dict = {
-  plot: {
-    market: 'Market', bridgeAB: 'Bridge', hut: 'Lumber hut', sawmill: 'Sawmill', bridgeBC: 'Bridge',
-    lighthouse: 'Lighthouse', upCap: 'Backpack', upSpeed: 'Boots', upHarvest: 'Axe', upHire: 'Hire',
+  pad: {
+    tower1: 'Crossbow tower', tower2: 'Crossbow tower', tower3: 'Crossbow tower', tower4: 'Crossbow tower',
+    axe: '+1 axe', bag: 'Bigger stack', boots: 'Faster boots', worker: 'Lumberjack', power: 'Tower power', wall: 'Stronger palisade',
   },
-  res: { wood: 'wood', stone: 'stone', plank: 'planks', gold: 'gold' },
-  collect: 'Collect: {r}',
-  build: 'Build: {b}',
-  upgrade: 'Upgrade: {b}',
-  hire: 'Hire a worker',
-  sell: 'Sell resources at the market',
-  takeCash: 'Pick up your coins',
-  feedSaw: 'Put wood into the sawmill',
-  takePlanks: 'Pick up planks',
+  chop: 'Chop trees in the forest',
+  deliver: 'Bring wood to the counter',
+  takeCash: 'Collect your cash',
+  buy: 'Buy: {b}',
+  defend: 'Bears! Defend the camp',
+  breach: 'Bears broke into the camp!',
+  free: 'Keep upgrading your camp',
   full: 'MAX',
-  lvl: 'Lv',
+  wave: 'Wave {n}',
+  waveIn: 'Wave {n} in {t}',
+  bearsLeft: '🐻 {n}',
+  wall: 'Palisade',
   welcome: 'Welcome back!',
-  win: 'Island complete!',
-  winSub: 'The lighthouse shines. Tap to keep playing',
-  explore: 'Keep building and upgrading!',
-  built: 'Built!',
+  waveCleared: 'Wave cleared!',
+  waveStart: 'The bears are coming!',
 };
 
-const lang = (navigator.language || 'en').toLowerCase().startsWith('pl') ? 'pl' : 'en';
+const lang = (globalThis.navigator?.language || 'en').toLowerCase().startsWith('pl') ? 'pl' : 'en';
 export const T: Dict = lang === 'pl' ? pl : en;
 
 export function fmt(s: string, vars: Record<string, string | number>): string {

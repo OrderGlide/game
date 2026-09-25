@@ -1,541 +1,698 @@
 import {
-  BRIDGES, COST_KEYS, ISLANDS, MAIN_ORDER, NODE_INFO, NODE_REGIONS, PLAYER_START, PLOTS, RES_VALUE,
-  SAW_IN_MAX, SAW_OUT_MAX, SAW_TIME, UPGRADES, WORKER, ZONES, inRect, mulberry32, stats,
-  type Cost, type CostKey, type IslandId, type NodeKind, type PlotDef, type PlotId, type Res,
-  type UpgradeId,
+  BEAR, CAMP, CASH_ZONE, COUNTER, COUNTER_MAX, DEPOSIT_ZONE, FIRST_WAVE_IN, FOREST, GATES, PADS, PAD_ORDER, PAD_SIZE,
+  PLAYER, QUEUE, TOWER, TREE, WAVE_GAP, wallMax, WORKER, WORLD, fenceBoxes, inBox, inCamp, mulberry32,
+  type Box, type PadDef, type PadId, type Pt,
 } from './data';
 import { sfx, vibrate } from './audio';
 import { T, fmt } from './i18n';
 
-export interface StackItem { res: Res; anim: number; fx: number; fy: number; }
-
-export interface ResNode {
-  kind: NodeKind; island: IslandId; x: number; y: number;
-  hp: number; maxHp: number; respawnT: number; shake: number; grow: number; reserved: boolean;
+export interface Tree { x: number; z: number; hp: number; respawnT: number; shake: number; grow: number; reserved: boolean; }
+export interface StackLog { anim: number; fx: number; fy: number; fz: number; }
+export interface Survivor {
+  id: number; x: number; z: number; want: number; got: number; slot: number;
+  state: 'walk' | 'wait' | 'leave'; serveT: number; walkT: number; face: number; path: Pt[];
 }
-
+export interface Bear {
+  id: number; x: number; z: number; hp: number; maxHp: number; homeZ: number;
+  state: 'spawn' | 'approach' | 'attack' | 'chase' | 'dead';
+  delay: number; atkT: number; flash: number; hitT: number; deadT: number; face: number; walkT: number;
+}
+export interface Tower { id: PadId; x: number; z: number; cd: number; aim: number; recoil: number; }
+export interface Bolt { id: number; x: number; y: number; z: number; dx: number; dy: number; dz: number; target: number; dmg: number; }
+export interface Drop { id: number; x: number; z: number; value: number; t: number; }
 export interface Worker {
-  x: number; y: number; facing: number; walkT: number;
-  state: 'seek' | 'walk' | 'chop' | 'deliver' | 'drop';
-  target: ResNode | null; carry: number; t: number;
+  id: number; x: number; z: number; face: number; walkT: number; moving: boolean;
+  state: 'toTree' | 'chop' | 'toCounter' | 'drop'; target: Tree | null; carry: number; t: number;
 }
+export interface PadState { def: PadDef; level: number; paid: number; pulse: number; }
 
-export interface Plot { def: PlotDef; paid: Cost; built: boolean; pulse: number; }
-
-export interface Flyer { kind: CostKey; x0: number; y0: number; x1: number; y1: number; t: number; dur: number; }
-export interface Floater { text: string; x: number; y: number; t: number; color: string; coin?: number; }
-export interface Particle { x: number; y: number; z: number; vx: number; vy: number; vz: number; life: number; color: string; size: number; }
+export type GameEvent =
+  | { type: 'fly'; kind: 'log' | 'cash'; x0: number; y0: number; z0: number; x1: number; y1: number; z1: number }
+  | { type: 'float'; text: string; x: number; z: number; color: string }
+  | { type: 'burst'; x: number; y: number; z: number; color: number; n: number }
+  | { type: 'build'; id: PadId; x: number; z: number }
+  | { type: 'shake'; power: number }
+  | { type: 'toast'; text: string; sub?: string };
 
 export interface SaveData {
-  v: 1; coins: number; cash: number; levels: Record<UpgradeId, number>;
-  plots: Partial<Record<PlotId, { paid: Cost; built: boolean }>>;
-  stack: Res[]; px: number; py: number; sawIn: number; sawOut: number; won: boolean; savedAt: number;
+  v: 2; money: number; cashPile: number; counterLogs: number;
+  pads: Partial<Record<PadId, { level: number; paid: number }>>;
+  stack: number; px: number; pz: number; wave: number; waveTimer: number; wallHp: number; savedAt: number;
 }
 
-const isUpgrade = (id: PlotId): id is UpgradeId => id.startsWith('up');
+interface GatePath { in: Pt; out: Pt; }
+const GATE_PATHS: GatePath[] = [
+  { in: { x: GATES.north.x, z: -CAMP.half + 1.4 }, out: { x: GATES.north.x, z: -CAMP.half - 1.6 } },
+  { in: { x: CAMP.half - 1.4, z: GATES.east.z }, out: { x: CAMP.half + 1.6, z: GATES.east.z } },
+];
+const EAST_GATE_ONLY = [GATE_PATHS[1]];
+
+const dist = (ax: number, az: number, bx: number, bz: number) => Math.hypot(ax - bx, az - bz);
+
+function distToSegment(x: number, z: number, a: Pt, b: Pt): number {
+  const vx = b.x - a.x, vz = b.z - a.z, len2 = vx * vx + vz * vz;
+  const t = Math.max(0, Math.min(1, ((x - a.x) * vx + (z - a.z) * vz) / len2));
+  return dist(x, z, a.x + vx * t, a.z + vz * t);
+}
 
 export class Game {
   player = {
-    x: PLAYER_START.x, y: PLAYER_START.y, facing: 1, walkT: 0, moving: false,
-    stack: [] as StackItem[], harvestT: 0, target: null as ResNode | null, swing: 0, fullFlash: 0,
+    x: PLAYER.start.x, z: PLAYER.start.z, face: Math.PI, moving: false, walkT: 0,
+    stack: [] as StackLog[], chopT: 0, target: null as Tree | null, hurtT: 0, kx: 0, kz: 0, axeAngle: 0,
   };
-  coins = 0;
-  cash = 0;
-  levels: Record<UpgradeId, number> = { upCap: 0, upSpeed: 0, upHarvest: 0, upHire: 0 };
-  plots: Plot[] = PLOTS.map((def) => ({ def, paid: {}, built: false, pulse: 0 }));
-  nodes: ResNode[] = [];
+  money = 0;
+  cashPile = 0;
+  counterLogs = 0;
+  pads: PadState[] = PADS.map((def) => ({ def, level: 0, paid: 0, pulse: 0 }));
+  trees: Tree[] = [];
+  survivors: Survivor[] = [];
+  bears: Bear[] = [];
+  towers: Tower[] = [];
+  bolts: Bolt[] = [];
+  drops: Drop[] = [];
   workers: Worker[] = [];
-  sawIn = 0;
-  sawOut = 0;
-  sawT = 0;
-  sawSpin = 0;
-  flyers: Flyer[] = [];
-  floaters: Floater[] = [];
-  particles: Particle[] = [];
-  shake = 0;
+  wave = 1;
+  waveTimer = FIRST_WAVE_IN;
+  waveActive = false;
+  breached = false;
+  wallHp = wallMax(0);
   time = 0;
-  won = false;
-  showWin = false;
-  toast: { text: string; sub?: string; t: number } | null = null;
+  events: GameEvent[] = [];
+  onChange: (() => void) | null = null;
+
+  private nextId = 1;
   private transferT = 0;
   private zoneKey = '';
   private zoneT = 0;
-  onChange: (() => void) | null = null;
+  private readonly boxes: Box[] = [...fenceBoxes(), COUNTER];
+  private rnd = mulberry32(99);
 
   constructor() {
-    const rnd = mulberry32(1337);
-    for (const reg of NODE_REGIONS) {
-      const r = reg.rect, s = reg.spacing;
-      const cols = Math.max(1, Math.floor(r.w / s)), rows = Math.max(1, Math.floor(r.h / s));
-      for (let i = 0; i < cols; i++) {
-        for (let j = 0; j < rows; j++) {
-          if (rnd() < 0.18) continue; // leave some gaps so it feels natural
-          const x = r.x - r.w / 2 + (i + 0.5) * (r.w / cols) + (rnd() - 0.5) * s * 0.45;
-          const y = r.y - r.h / 2 + (j + 0.5) * (r.h / rows) + (rnd() - 0.5) * s * 0.45;
-          if (PLOTS.some((p) => inRect(x, y, p, 30)) || Object.values(ZONES).some((z) => inRect(x, y, z, 30))) continue;
-          const hp = NODE_INFO[reg.kind].hp;
-          this.nodes.push({ kind: reg.kind, island: reg.island, x, y, hp, maxHp: hp, respawnT: 0, shake: 0, grow: 1, reserved: false });
-        }
+    const rnd = mulberry32(2024);
+    const f = FOREST, s = TREE.spacing;
+    for (let x = f.x - f.w / 2 + s / 2; x < f.x + f.w / 2; x += s) {
+      for (let z = f.z - f.d / 2 + s / 2; z < f.z + f.d / 2; z += s) {
+        const tx = x + (rnd() - 0.5) * s * 0.5, tz = z + (rnd() - 0.5) * s * 0.5;
+        this.trees.push({ x: tx, z: tz, hp: TREE.hp, respawnT: 0, shake: 0, grow: 1, reserved: false });
       }
+    }
+    for (let i = 0; i < QUEUE.size; i++) {
+      const p = this.slotPos(i);
+      this.survivors.push(this.newSurvivor(p.x, p.z, i, 'wait'));
     }
   }
 
   // ---------- queries ----------
 
-  plot(id: PlotId): Plot { return this.plots.find((p) => p.def.id === id)!; }
-  isBuilt(id: PlotId): boolean { return this.plot(id).built; }
-  get capacity(): number { return stats.capacity(this.levels.upCap); }
+  pad(id: PadId): PadState { return this.pads.find((p) => p.def.id === id)!; }
+  level(id: PadId): number { return this.pad(id).level; }
+  get axes(): number { return 1 + this.level('axe'); }
+  get capacity(): number { return PLAYER.capacity(this.level('bag')); }
+  get speed(): number { return PLAYER.speed(this.level('boots')); }
+  get wallMax(): number { return wallMax(this.level('wall')); }
+  get towerDamage(): number { return TOWER.damage * 1.3 ** this.level('power'); }
 
-  islandUnlocked(id: IslandId): boolean {
-    const isl = ISLANDS.find((i) => i.id === id)!;
-    return !isl.unlockedBy || this.isBuilt(isl.unlockedBy);
+  padVisible(p: PadState): boolean {
+    return p.level < p.def.max && p.def.requires.every((r) => this.level(r) >= 1);
   }
+  padCost(p: PadState): number { return p.def.cost(p.level); }
+  padRemaining(p: PadState): number { return Math.max(0, this.padCost(p) - p.paid); }
 
-  plotVisible(p: Plot): boolean {
-    if (p.built) return false;
-    if (!p.def.requires.every((r) => this.isBuilt(r))) return false;
-    if (isUpgrade(p.def.id) && this.levels[p.def.id] >= UPGRADES[p.def.id].max) return false;
-    return true;
-  }
+  aliveBears(): Bear[] { return this.bears.filter((b) => b.state !== 'dead' && b.state !== 'spawn'); }
 
-  plotCost(p: Plot): Cost {
-    const id = p.def.id;
-    if (isUpgrade(id)) return { coin: UPGRADES[id].cost(this.levels[id]) };
-    return p.def.cost ?? {};
-  }
-
-  remaining(p: Plot, k: CostKey): number {
-    return Math.max(0, (this.plotCost(p)[k] ?? 0) - (p.paid[k] ?? 0));
-  }
-
-  progress(p: Plot): number {
-    const c = this.plotCost(p);
-    let total = 0, paid = 0;
-    for (const k of COST_KEYS) { total += c[k] ?? 0; paid += Math.min(c[k] ?? 0, p.paid[k] ?? 0); }
-    return total ? paid / total : 0;
-  }
-
-  walkable(x: number, y: number): boolean {
-    for (const isl of ISLANDS) if (this.islandUnlocked(isl.id) && inRect(x, y, isl, -14)) return true;
-    for (const b of BRIDGES) if (this.isBuilt(b.id) && inRect(x, y, b)) return true;
+  blocked(x: number, z: number, r: number): boolean {
+    if (x < WORLD.minX || x > WORLD.maxX || z < WORLD.minZ || z > WORLD.maxZ) return true;
+    for (const b of this.boxes) if (inBox(x, z, b, r)) return true;
+    for (const t of this.towers) if (dist(x, z, t.x, t.z) < 0.8 + r) return true;
     return false;
   }
 
-  countInStack(r: Res): number { return this.player.stack.reduce((n, s) => n + (s.res === r ? 1 : 0), 0); }
+  /** Next point on the way to (tx,tz); crossing the palisade routes through a gate. */
+  waypoint(x: number, z: number, tx: number, tz: number, gates = GATE_PATHS): Pt {
+    const a = inCamp(x, z);
+    if (a === inCamp(tx, tz)) return { x: tx, z: tz };
+    let best = gates[0], bestD = Infinity;
+    for (const g of gates) {
+      const s = a ? g.in : g.out, e = a ? g.out : g.in;
+      const d = dist(x, z, s.x, s.z) + dist(e.x, e.z, tx, tz);
+      if (d < bestD) { bestD = d; best = g; }
+    }
+    const s = a ? best.in : best.out, e = a ? best.out : best.in;
+    return distToSegment(x, z, s, e) < 0.6 ? e : s;
+  }
 
   // ---------- update ----------
 
-  update(dt: number, dir: { x: number; y: number }): void {
+  update(dt: number, dir: { x: number; z: number }): void {
     this.time += dt;
     this.updatePlayer(dt, dir);
-    this.updateNodes(dt);
+    this.updateTrees(dt);
     this.updateTransfers(dt);
-    this.updateSawmill(dt);
+    this.updateSurvivors(dt);
+    this.updateWaves(dt);
+    this.updateBears(dt);
+    this.updateTowers(dt);
     for (const w of this.workers) this.updateWorker(w, dt);
-    this.updateFx(dt);
+    this.updateDrops(dt);
+    for (const p of this.pads) p.pulse = Math.max(0, p.pulse - dt);
   }
 
-  private updatePlayer(dt: number, dir: { x: number; y: number }): void {
-    const p = this.player;
-    const sp = stats.speed(this.levels.upSpeed);
-    const nx = p.x + dir.x * sp * dt, ny = p.y + dir.y * sp * dt;
-    if (this.walkable(nx, p.y)) p.x = nx;
-    if (this.walkable(p.x, ny)) p.y = ny;
-    p.moving = Math.hypot(dir.x, dir.y) > 0.1;
-    if (p.moving) p.walkT += dt * 10;
-    if (Math.abs(dir.x) > 0.15) p.facing = Math.sign(dir.x);
-    for (const s of p.stack) s.anim = Math.min(1, s.anim + dt * 5);
-    p.fullFlash = Math.max(0, p.fullFlash - dt);
+  private moveBody(o: { x: number; z: number }, dx: number, dz: number, r: number): void {
+    if (!this.blocked(o.x + dx, o.z, r)) o.x += dx;
+    if (!this.blocked(o.x, o.z + dz, r)) o.z += dz;
+  }
 
-    // auto-harvest the nearest node in reach
+  private updatePlayer(dt: number, dir: { x: number; z: number }): void {
+    const p = this.player;
+    p.hurtT = Math.max(0, p.hurtT - dt);
+    const decay = Math.exp(-7 * dt);
+    p.kx *= decay;
+    p.kz *= decay;
+    const sp = this.speed;
+    this.moveBody(p, (dir.x * sp + p.kx) * dt, (dir.z * sp + p.kz) * dt, PLAYER.radius);
+    p.moving = Math.hypot(dir.x, dir.z) > 0.1;
+    if (p.moving) {
+      p.walkT += dt * 11;
+      p.face = turnTo(p.face, Math.atan2(dir.x, dir.z), dt * 12);
+    }
+    p.axeAngle += dt * (4.5 + this.axes * 0.5);
+    for (const s of p.stack) s.anim = Math.min(1, s.anim + dt * 5);
+
+    // the orbiting axes chop the nearest tree in reach
     p.target = null;
     if (p.stack.length < this.capacity) {
-      let best: ResNode | null = null, bestD = 56;
-      for (const n of this.nodes) {
-        if (n.hp <= 0) continue;
-        const d = Math.hypot(n.x - p.x, n.y - p.y);
-        if (d < bestD) { best = n; bestD = d; }
+      let best: Tree | null = null, bestD = PLAYER.axeReach;
+      for (const t of this.trees) {
+        if (t.hp <= 0) continue;
+        const d = dist(t.x, t.z, p.x, p.z);
+        if (d < bestD) { best = t; bestD = d; }
       }
       p.target = best;
     }
     if (p.target) {
-      p.swing += dt;
-      p.harvestT += dt;
-      const interval = stats.harvestInterval(this.levels.upHarvest);
-      if (p.harvestT >= interval) {
-        p.harvestT -= interval;
-        const res = this.hitNode(p.target);
-        p.stack.push({ res, anim: 0, fx: p.target.x, fy: p.target.y - 24 });
+      p.chopT += dt;
+      const every = PLAYER.chopInterval(this.axes);
+      if (p.chopT >= every) {
+        p.chopT -= every;
+        this.hitTree(p.target);
+        p.stack.push({ anim: 0, fx: p.target.x, fy: 1.2, fz: p.target.z });
         sfx('pick');
-        if (p.stack.length >= this.capacity) {
-          p.fullFlash = 1;
-          this.floaters.push({ text: T.full, x: p.x, y: p.y - 60, t: 0, color: '#ff5a4f' });
-        }
+        if (p.stack.length >= this.capacity) this.events.push({ type: 'float', text: T.full, x: p.x, z: p.z, color: '#ff5a4f' });
       }
-    } else {
-      p.harvestT = 0;
-      p.swing = 0;
+    } else p.chopT = 0;
+
+    // ...and hurt any bear that gets close
+    for (const b of this.bears) {
+      if (b.state === 'dead' || b.state === 'spawn') continue;
+      if (dist(b.x, b.z, p.x, p.z) > PLAYER.axeReach + 0.6) continue;
+      b.hitT += dt;
+      const tick = b.hitT >= 0.22;
+      if (tick) b.hitT = 0;
+      this.damageBear(b, PLAYER.axeDps(this.axes) * dt, tick);
     }
   }
 
-  private hitNode(n: ResNode): Res {
-    n.hp--;
-    n.shake = 0.25;
-    const info = NODE_INFO[n.kind];
-    if (n.hp <= 0) { n.respawnT = info.respawn; n.reserved = false; }
-    const col = n.kind === 'tree' ? '#c68a4c' : n.kind === 'gold' ? '#ffd23f' : '#a4acb8';
-    for (let i = 0; i < 4; i++) this.burst(n.x, n.y, col, 1, 70, 90);
+  private hitTree(t: Tree): void {
+    t.hp--;
+    t.shake = 0.3;
+    if (t.hp <= 0) { t.respawnT = TREE.respawn; t.reserved = false; }
+    this.events.push({ type: 'burst', x: t.x, y: 1.4, z: t.z, color: 0x3f9a4a, n: 5 });
     sfx('chop');
-    return info.res;
   }
 
-  private updateNodes(dt: number): void {
-    for (const n of this.nodes) {
-      n.shake = Math.max(0, n.shake - dt);
-      if (n.hp <= 0) {
-        n.respawnT -= dt;
-        if (n.respawnT <= 0) { n.hp = n.maxHp; n.grow = 0; }
+  private updateTrees(dt: number): void {
+    for (const t of this.trees) {
+      t.shake = Math.max(0, t.shake - dt);
+      if (t.hp <= 0) {
+        t.respawnT -= dt;
+        if (t.respawnT <= 0) { t.hp = TREE.hp; t.grow = 0; }
       }
-      n.grow = Math.min(1, n.grow + dt * 3);
+      t.grow = Math.min(1, t.grow + dt * 2);
     }
   }
 
-  private zoneAt(x: number, y: number): string {
-    for (const pl of this.plots) if (this.plotVisible(pl) && inRect(x, y, pl.def)) return pl.def.id;
-    if (this.isBuilt('market')) {
-      if (inRect(x, y, ZONES.marketSell)) return 'sell';
-      if (inRect(x, y, ZONES.marketCash)) return 'cash';
+  // ---------- zones: counter, cash pile, pads ----------
+
+  private zoneAt(x: number, z: number): string {
+    for (const p of this.pads) {
+      if (this.padVisible(p) && inBox(x, z, { x: p.def.x, z: p.def.z, w: PAD_SIZE, d: PAD_SIZE })) return p.def.id;
     }
-    if (this.isBuilt('sawmill')) {
-      if (inRect(x, y, ZONES.sawIn)) return 'sawIn';
-      if (inRect(x, y, ZONES.sawOut)) return 'sawOut';
-    }
+    if (inBox(x, z, DEPOSIT_ZONE)) return 'deposit';
+    if (inBox(x, z, CASH_ZONE)) return 'cash';
     return '';
   }
 
   private updateTransfers(dt: number): void {
     const p = this.player;
-    const key = this.zoneAt(p.x, p.y);
-    // upgrade pads only spend coins while the player stands still on them
-    if (key !== this.zoneKey || (key.startsWith('up') && p.moving)) { this.zoneKey = key; this.zoneT = 0; }
+    const key = this.zoneAt(p.x, p.z);
+    const isPad = key !== '' && key !== 'deposit' && key !== 'cash';
+    // pads only spend while the player stands still, so walking across one never buys anything
+    if (key !== this.zoneKey || (isPad && p.moving)) { this.zoneKey = key; this.zoneT = 0; }
     this.zoneT += dt;
-    // items are only taken after a short stay, so walking across a zone doesn't empty the backpack
-    const pickup = key === 'cash' || key === 'sawOut';
-    if (!key || (!pickup && this.zoneT < 0.3)) return;
+    if (!key || this.zoneT < (isPad ? 0.25 : key === 'deposit' ? 0.12 : 0)) return;
     this.transferT -= dt;
     if (this.transferT > 0) return;
     let did = false;
 
-    for (const plot of this.plots) {
-      if (!this.plotVisible(plot) || !inRect(p.x, p.y, plot.def)) continue;
-      did = this.payPlot(plot);
-      if (did) break;
-    }
-    if (!did && this.isBuilt('market')) {
-      if (inRect(p.x, p.y, ZONES.marketSell) && p.stack.length) {
-        const s = p.stack.pop()!;
-        this.cash += RES_VALUE[s.res];
-        this.fly(s.res, p.x, p.y - this.stackTopOffset(), ZONES.marketSell.x, ZONES.marketSell.y - 30);
+    if (key === 'deposit') {
+      if (p.stack.length && this.counterLogs < COUNTER_MAX) {
+        p.stack.pop();
+        this.counterLogs++;
+        this.events.push({ type: 'fly', kind: 'log', x0: p.x, y0: 1.2 + p.stack.length * 0.3, z0: p.z, x1: COUNTER.x, y1: 1.3, z1: COUNTER.z });
         sfx('drop');
         did = true;
-      } else if (inRect(p.x, p.y, ZONES.marketCash) && this.cash > 0) {
-        const chunk = Math.min(this.cash, Math.max(1, Math.ceil(this.cash / 10)));
-        this.cash -= chunk;
-        this.coins += chunk;
-        this.fly('coin', ZONES.marketCash.x, ZONES.marketCash.y, p.x, p.y - 30);
-        this.coinFloater(chunk);
+      }
+    } else if (key === 'cash') {
+      if (this.cashPile > 0) {
+        const chunk = Math.min(this.cashPile, Math.max(1, Math.ceil(this.cashPile / 12)));
+        this.cashPile -= chunk;
+        this.money += chunk;
+        this.events.push({ type: 'fly', kind: 'cash', x0: CASH_ZONE.x, y0: 0.6, z0: CASH_ZONE.z, x1: p.x, y1: 1.4, z1: p.z });
         sfx('coin');
         did = true;
       }
-    }
-    if (!did && this.isBuilt('sawmill')) {
-      if (inRect(p.x, p.y, ZONES.sawIn) && this.sawIn < SAW_IN_MAX) {
-        const i = this.findInStack('wood');
-        if (i >= 0) {
-          p.stack.splice(i, 1);
-          this.sawIn++;
-          this.fly('wood', p.x, p.y - this.stackTopOffset(), ZONES.sawIn.x, ZONES.sawIn.y - 40);
-          sfx('drop');
-          did = true;
-        }
-      } else if (inRect(p.x, p.y, ZONES.sawOut) && this.sawOut > 0 && p.stack.length < this.capacity) {
-        this.sawOut--;
-        p.stack.push({ res: 'plank', anim: 0, fx: ZONES.sawOut.x, fy: ZONES.sawOut.y - 10 });
-        sfx('pick');
+    } else {
+      const pad = this.pad(key as PadId);
+      const rem = this.padRemaining(pad);
+      if (rem > 0 && this.money > 0) {
+        const chunk = Math.min(this.money, rem, Math.max(1, Math.ceil(this.padCost(pad) / 20)));
+        this.money -= chunk;
+        pad.paid += chunk;
+        pad.pulse = 0.12;
+        this.events.push({ type: 'fly', kind: 'cash', x0: p.x, y0: 1.4, z0: p.z, x1: pad.def.x, y1: 0.1, z1: pad.def.z });
+        sfx('coin');
+        if (pad.paid >= this.padCost(pad)) this.completePad(pad);
         did = true;
       }
     }
-    this.transferT = did ? 0.065 : 0;
+    this.transferT = did ? 0.06 : 0;
     if (did) this.onChange?.();
   }
 
-  private findInStack(r: Res): number {
-    const s = this.player.stack;
-    for (let i = s.length - 1; i >= 0; i--) if (s[i].res === r) return i;
-    return -1;
-  }
-
-  private payPlot(plot: Plot): boolean {
-    const p = this.player;
-    for (let i = p.stack.length - 1; i >= 0; i--) {
-      const r = p.stack[i].res;
-      if (this.remaining(plot, r) > 0) {
-        p.stack.splice(i, 1);
-        plot.paid[r] = (plot.paid[r] ?? 0) + 1;
-        plot.pulse = 0.15;
-        this.fly(r, p.x, p.y - this.stackTopOffset(), plot.def.x, plot.def.y);
-        sfx('drop');
-        this.checkComplete(plot);
-        return true;
-      }
+  private completePad(pad: PadState): void {
+    pad.level++;
+    pad.paid = 0;
+    const { id, x, z } = pad.def;
+    if (id.startsWith('tower')) {
+      this.towers.push({ id, x, z, cd: 0.5, aim: -Math.PI / 2, recoil: 0 });
+      // step off the spot where the tower appears
+      const p = this.player;
+      if (dist(p.x, p.z, x, z) < 1.4) p.x = x - 1.5;
     }
-    const need = this.remaining(plot, 'coin');
-    if (need > 0 && this.coins > 0) {
-      const total = this.plotCost(plot).coin ?? 0;
-      const chunk = Math.min(this.coins, need, Math.max(1, Math.ceil(total / 24)));
-      this.coins -= chunk;
-      plot.paid.coin = (plot.paid.coin ?? 0) + chunk;
-      plot.pulse = 0.15;
-      this.fly('coin', p.x, p.y - 30, plot.def.x, plot.def.y);
-      sfx('coin');
-      this.checkComplete(plot);
-      return true;
-    }
-    return false;
-  }
-
-  private checkComplete(plot: Plot): void {
-    const cost = this.plotCost(plot);
-    if (!COST_KEYS.every((k) => (plot.paid[k] ?? 0) >= (cost[k] ?? 0))) return;
-    const id = plot.def.id;
-    const { x, y } = plot.def;
-    if (isUpgrade(id)) {
-      this.levels[id]++;
-      plot.paid = {};
-      sfx('upgrade');
-      vibrate(30);
-      this.burst(x, y, '#ffd23f', 14, 160, 260);
-      const lvlText = id === 'upHire' ? `+1 👷` : `${T.lvl} ${this.levels[id] + 1}`;
-      this.floaters.push({ text: lvlText, x, y: y - 50, t: 0, color: '#fff' });
-      if (id === 'upHire') this.spawnWorker();
-    } else {
-      plot.built = true;
-      sfx('build');
-      vibrate(80);
-      this.shake = 0.35;
-      const cols = ['#ff5a4f', '#ffd23f', '#4fd1ff', '#7cff6b', '#ff8ad8'];
-      for (let i = 0; i < 40; i++) this.burst(x, y, cols[i % cols.length], 1, 260, 420);
-      this.floaters.push({ text: T.built, x, y: y - 70, t: 0, color: '#fff' });
-      if (id === 'lighthouse') { this.won = true; this.showWin = true; }
-    }
+    if (id === 'worker') this.spawnWorker();
+    if (id === 'wall') this.wallHp = this.wallMax;
+    this.events.push({ type: 'build', id, x, z });
+    this.events.push({ type: 'shake', power: 0.25 });
+    sfx(id.startsWith('tower') ? 'build' : 'upgrade');
+    vibrate(60);
     this.onChange?.();
   }
 
-  private updateSawmill(dt: number): void {
-    if (!this.isBuilt('sawmill')) return;
-    const working = this.sawIn > 0 && this.sawOut < SAW_OUT_MAX;
-    if (working) {
-      this.sawSpin += dt * 18;
-      this.sawT += dt;
-      if (this.sawT >= SAW_TIME) {
-        this.sawT = 0;
-        this.sawIn--;
-        this.sawOut++;
-        this.burst(ZONES.sawIn.x + 55, ZONES.sawIn.y - 80, '#e8c48a', 3, 60, 120);
+  // ---------- survivors ----------
+
+  private slotPos(i: number): Pt { return { x: QUEUE.x + (i % 2 ? 0.28 : -0.28), z: QUEUE.z + i * QUEUE.gap }; }
+
+  private newSurvivor(x: number, z: number, slot: number, state: Survivor['state']): Survivor {
+    const maxWant = Math.min(4, 1 + this.wave * 0.5);
+    return {
+      id: this.nextId++, x, z, slot, state, want: 1 + Math.floor(this.rnd() * maxWant), got: 0,
+      serveT: 0, walkT: this.rnd() * 10, face: Math.PI, path: [],
+    };
+  }
+
+  private updateSurvivors(dt: number): void {
+    const queued = this.survivors.filter((s) => s.state !== 'leave').length;
+    for (let i = queued; i < QUEUE.size; i++) {
+      this.survivors.push(this.newSurvivor(QUEUE.x + (this.rnd() - 0.5) * 2, QUEUE.spawnZ + i * 0.8, i, 'walk'));
+    }
+    for (const s of this.survivors) {
+      if (s.state === 'leave') {
+        const t = s.path[0];
+        if (t && this.walkTo(s, t.x, t.z, 3.4, dt, 0.2)) s.path.shift();
+        continue;
       }
+      const slot = this.slotPos(s.slot);
+      if (this.walkTo(s, slot.x, slot.z, 3.2, dt, 0.05)) {
+        s.state = 'wait';
+        s.face = turnTo(s.face, Math.PI, dt * 8);
+      } else s.state = 'walk';
+      if (s.slot !== 0 || s.state !== 'wait') continue;
+      s.serveT += dt;
+      if (s.serveT >= 0.28 && s.got < s.want && this.counterLogs > 0) {
+        s.serveT = 0;
+        this.counterLogs--;
+        s.got++;
+        this.events.push({ type: 'fly', kind: 'log', x0: COUNTER.x, y0: 1.3, z0: COUNTER.z, x1: s.x, y1: 1.3, z1: s.z });
+        sfx('pick');
+      }
+      if (s.got >= s.want) {
+        const pay = s.want * QUEUE.pricePerLog;
+        this.cashPile += pay;
+        this.events.push({ type: 'fly', kind: 'cash', x0: s.x, y0: 1.5, z0: s.z, x1: CASH_ZONE.x, y1: 0.4, z1: CASH_ZONE.z });
+        this.events.push({ type: 'float', text: `+$${pay}`, x: s.x, z: s.z, color: '#7dff7a' });
+        sfx('coin');
+        s.state = 'leave';
+        s.path = [{ x: s.x - 3, z: s.z + 1.5 }, { x: -16, z: 25 }];
+        for (const o of this.survivors) if (o.state !== 'leave') o.slot--;
+        this.onChange?.();
+      }
+    }
+    this.survivors = this.survivors.filter((s) => s.state !== 'leave' || s.path.length > 0);
+  }
+
+  private walkTo(o: { x: number; z: number; face: number; walkT: number }, tx: number, tz: number, speed: number, dt: number, stop: number): boolean {
+    const dx = tx - o.x, dz = tz - o.z, d = Math.hypot(dx, dz);
+    if (d <= stop) return true;
+    const step = Math.min(d, speed * dt);
+    o.x += (dx / d) * step;
+    o.z += (dz / d) * step;
+    o.walkT += dt * 10;
+    o.face = turnTo(o.face, Math.atan2(dx, dz), dt * 10);
+    return false;
+  }
+
+  // ---------- bears & defence ----------
+
+  private updateWaves(dt: number): void {
+    if (!this.waveActive) {
+      this.wallHp = Math.min(this.wallMax, this.wallHp + 10 * dt);
+      this.waveTimer -= dt;
+      if (this.waveTimer <= 0) this.startWave();
+      return;
+    }
+    if (this.bears.every((b) => b.state === 'dead')) {
+      this.waveActive = false;
+      this.breached = false;
+      this.wave++;
+      this.waveTimer = WAVE_GAP;
+      this.events.push({ type: 'toast', text: T.waveCleared });
+      sfx('upgrade');
+      this.onChange?.();
     }
   }
 
-  spawnWorker(): void {
-    const h = this.plot('hut').def;
-    this.workers.push({ x: h.x, y: h.y + 40, facing: 1, walkT: 0, state: 'seek', target: null, carry: 0, t: 0 });
+  private startWave(): void {
+    this.waveActive = true;
+    const n = BEAR.count(this.wave), hp = BEAR.hp(this.wave);
+    for (let i = 0; i < n; i++) {
+      const z = -10 + this.rnd() * 20;
+      this.bears.push({
+        id: this.nextId++, x: 27 + this.rnd() * 4, z, hp, maxHp: hp, homeZ: Math.max(-7.3, Math.min(7.3, z)),
+        state: 'spawn', delay: i * 1.3, atkT: 0, flash: 0, hitT: 0, deadT: 0, face: -Math.PI / 2, walkT: 0,
+      });
+    }
+    this.events.push({ type: 'toast', text: fmt(T.wave, { n: this.wave }), sub: T.waveStart });
+    sfx('bear');
   }
 
-  private moveTo(w: Worker, tx: number, ty: number, dt: number, stopAt: number): boolean {
-    const dx = tx - w.x, dy = ty - w.y, d = Math.hypot(dx, dy);
-    if (d <= stopAt) return true;
-    const step = Math.min(d - stopAt, WORKER.speed * dt);
-    w.x += (dx / d) * step;
-    w.y += (dy / d) * step;
-    w.walkT += dt * 9;
-    if (Math.abs(dx) > 1) w.facing = Math.sign(dx);
-    return false;
+  private damageBear(b: Bear, dmg: number, fx: boolean): void {
+    if (b.state === 'dead') return;
+    b.hp -= dmg;
+    if (fx) {
+      b.flash = 1;
+      this.events.push({ type: 'burst', x: b.x, y: 1.1, z: b.z, color: 0xb3262e, n: 4 });
+      sfx('hit');
+    }
+    if (b.hp <= 0) {
+      b.state = 'dead';
+      b.deadT = 0;
+      this.drops.push({ id: this.nextId++, x: b.x, z: b.z, value: BEAR.reward(this.wave), t: 0 });
+      this.events.push({ type: 'burst', x: b.x, y: 1, z: b.z, color: 0xffffff, n: 14 });
+      sfx('bear');
+    }
+  }
+
+  private updateBears(dt: number): void {
+    const p = this.player;
+    const playerOut = !inCamp(p.x, p.z);
+    for (const b of this.bears) {
+      if (b.state === 'dead') { b.deadT += dt; continue; }
+      if (b.state === 'spawn') { b.delay -= dt; if (b.delay <= 0) b.state = 'approach'; continue; }
+      b.flash = Math.max(0, b.flash - dt * 9);
+      const dP = dist(b.x, b.z, p.x, p.z);
+      const canChase = this.breached || (playerOut && dP < BEAR.aggro);
+      if (canChase) b.state = 'chase';
+      else if (b.state === 'chase') b.state = 'approach';
+
+      if (b.state === 'chase') {
+        if (dP < 1.5) {
+          b.face = turnTo(b.face, Math.atan2(p.x - b.x, p.z - b.z), dt * 10);
+          b.atkT += dt;
+          if (b.atkT >= 1.1) { b.atkT = 0; this.hurtPlayer(b); }
+        } else {
+          const wp = this.breached ? this.waypoint(b.x, b.z, p.x, p.z, EAST_GATE_ONLY) : { x: p.x, z: p.z };
+          this.walkTo(b, wp.x, wp.z, BEAR.speed * 1.15, dt, 0.1);
+        }
+      } else if (b.state === 'approach') {
+        if (this.walkTo(b, CAMP.half + 1.2, b.homeZ, BEAR.speed, dt, 0.15)) { b.state = 'attack'; b.atkT = 0; }
+      } else if (b.state === 'attack') {
+        b.face = turnTo(b.face, -Math.PI / 2, dt * 8);
+        b.atkT += dt;
+        if (b.atkT >= BEAR.attackEvery) {
+          b.atkT = 0;
+          this.wallHp = Math.max(0, this.wallHp - BEAR.wallDamage);
+          this.events.push({ type: 'burst', x: CAMP.half + 0.3, y: 1, z: b.z, color: 0xc9844a, n: 5 });
+          sfx('thud');
+          if (this.wallHp <= 0 && !this.breached) {
+            this.breached = true;
+            this.events.push({ type: 'toast', text: T.breach });
+            this.events.push({ type: 'shake', power: 0.5 });
+            vibrate(150);
+          }
+        }
+      }
+      if (!this.breached) b.x = Math.max(b.x, CAMP.half + 0.9); // the palisade holds
+    }
+    // keep bears from overlapping
+    const alive = this.aliveBears();
+    for (let i = 0; i < alive.length; i++) {
+      for (let j = i + 1; j < alive.length; j++) {
+        const a = alive[i], c = alive[j];
+        const d = dist(a.x, a.z, c.x, c.z);
+        if (d > 0 && d < 1.3) {
+          const push = (1.3 - d) / 2, nx = (a.x - c.x) / d, nz = (a.z - c.z) / d;
+          a.x += nx * push; a.z += nz * push; c.x -= nx * push; c.z -= nz * push;
+        }
+      }
+    }
+    this.bears = this.bears.filter((b) => b.state !== 'dead' || b.deadT < 1.6);
+  }
+
+  private hurtPlayer(b: Bear): void {
+    const p = this.player;
+    if (p.hurtT > 0) return;
+    p.hurtT = 1.2;
+    const d = Math.max(0.01, dist(p.x, p.z, b.x, b.z));
+    p.kx = ((p.x - b.x) / d) * 10;
+    p.kz = ((p.z - b.z) / d) * 10;
+    const lost = Math.min(3, p.stack.length);
+    p.stack.length -= lost;
+    if (lost) this.events.push({ type: 'float', text: `-${lost}`, x: p.x, z: p.z, color: '#ff6b5f' });
+    this.events.push({ type: 'burst', x: p.x, y: 1.2, z: p.z, color: 0xc9844a, n: 6 + lost * 3 });
+    this.events.push({ type: 'shake', power: 0.35 });
+    sfx('hurt');
+    vibrate(90);
+  }
+
+  private updateTowers(dt: number): void {
+    for (const t of this.towers) {
+      t.cd -= dt;
+      t.recoil = Math.max(0, t.recoil - dt * 4);
+      let target: Bear | null = null, bestD = TOWER.range;
+      for (const b of this.bears) {
+        if (b.state === 'dead' || b.state === 'spawn') continue;
+        const d = dist(b.x, b.z, t.x, t.z);
+        if (d < bestD) { target = b; bestD = d; }
+      }
+      if (!target) continue;
+      t.aim = turnTo(t.aim, Math.atan2(target.x - t.x, target.z - t.z), dt * 10);
+      if (t.cd <= 0) {
+        t.cd = TOWER.every;
+        t.recoil = 1;
+        this.bolts.push({ id: this.nextId++, x: t.x, y: 2.9, z: t.z, dx: 0, dy: 0, dz: 1, target: target.id, dmg: this.towerDamage });
+        sfx('shoot');
+      }
+    }
+    for (const bolt of this.bolts) {
+      const b = this.bears.find((x) => x.id === bolt.target);
+      if (!b || b.state === 'dead') { bolt.target = -1; continue; }
+      const dx = b.x - bolt.x, dy = 1 - bolt.y, dz = b.z - bolt.z, d = Math.hypot(dx, dy, dz);
+      const step = 28 * dt;
+      bolt.dx = dx / d; bolt.dy = dy / d; bolt.dz = dz / d;
+      if (d <= step + 0.3) {
+        this.damageBear(b, bolt.dmg, true);
+        bolt.target = -1;
+        continue;
+      }
+      bolt.x += bolt.dx * step; bolt.y += bolt.dy * step; bolt.z += bolt.dz * step;
+    }
+    this.bolts = this.bolts.filter((b) => b.target !== -1);
+  }
+
+  private updateDrops(dt: number): void {
+    const p = this.player;
+    for (const d of this.drops) {
+      d.t += dt;
+      const dd = dist(d.x, d.z, p.x, p.z);
+      if (dd < 0.7) {
+        this.money += d.value;
+        this.events.push({ type: 'float', text: `+$${d.value}`, x: p.x, z: p.z, color: '#7dff7a' });
+        d.value = 0;
+        sfx('coin');
+        this.onChange?.();
+      } else if (dd < 3) {
+        const step = Math.min(dd, 12 * dt);
+        d.x += ((p.x - d.x) / dd) * step;
+        d.z += ((p.z - d.z) / dd) * step;
+      }
+    }
+    this.drops = this.drops.filter((d) => d.value > 0);
+  }
+
+  // ---------- lumberjack workers ----------
+
+  spawnWorker(): void {
+    this.workers.push({ id: this.nextId++, x: -5, z: 4, face: 0, walkT: 0, moving: false, state: 'toTree', target: null, carry: 0, t: 0 });
   }
 
   private updateWorker(w: Worker, dt: number): void {
     const release = () => { if (w.target) w.target.reserved = false; w.target = null; };
+    const go = (tx: number, tz: number, stop: number): boolean => {
+      const wp = this.waypoint(w.x, w.z, tx, tz);
+      const final = wp.x === tx && wp.z === tz;
+      const arrived = this.walkTo(w, wp.x, wp.z, WORKER.speed, dt, final ? stop : 0.1);
+      w.moving = !(arrived && final);
+      return arrived && final;
+    };
     switch (w.state) {
-      case 'seek': {
-        if (w.carry >= WORKER.carry) { w.state = 'deliver'; break; }
-        let best: ResNode | null = null, bestD = Infinity;
-        for (const n of this.nodes) {
-          if (n.kind !== 'tree' || n.island !== 'A' || n.hp <= 0 || n.reserved) continue;
-          const d = Math.hypot(n.x - w.x, n.y - w.y);
-          if (d < bestD) { best = n; bestD = d; }
+      case 'toTree': {
+        if (!w.target || w.target.hp <= 0) {
+          release();
+          let best: Tree | null = null, bestD = Infinity;
+          const gate = GATE_PATHS[0].out;
+          for (const t of this.trees) {
+            if (t.hp <= 0 || t.reserved) continue;
+            const d = dist(t.x, t.z, gate.x, gate.z);
+            if (d < bestD) { best = t; bestD = d; }
+          }
+          if (!best) { w.moving = false; break; }
+          best.reserved = true;
+          w.target = best;
         }
-        if (best) { best.reserved = true; w.target = best; w.state = 'walk'; }
-        else if (w.carry > 0) w.state = 'deliver';
-        break;
-      }
-      case 'walk': {
-        const t = w.target;
-        if (!t || t.hp <= 0) { release(); w.state = 'seek'; break; }
-        if (this.moveTo(w, t.x + (w.x < t.x ? -30 : 30), t.y + 8, dt, 4)) { w.state = 'chop'; w.t = 0; }
+        if (go(w.target.x, w.target.z + 1, 0.2)) { w.state = 'chop'; w.t = 0; }
         break;
       }
       case 'chop': {
+        w.moving = false;
         const t = w.target;
-        if (!t || t.hp <= 0) { release(); w.state = 'seek'; break; }
+        if (!t || t.hp <= 0) { release(); w.state = w.carry > 0 ? 'toCounter' : 'toTree'; break; }
+        w.face = turnTo(w.face, Math.atan2(t.x - w.x, t.z - w.z), dt * 8);
         w.t += dt;
         if (w.t >= WORKER.chopTime) {
           w.t = 0;
-          this.hitNode(t);
+          this.hitTree(t);
           w.carry++;
-          if (w.carry >= WORKER.carry || t.hp <= 0) { release(); w.state = w.carry >= WORKER.carry ? 'deliver' : 'seek'; }
+          if (w.carry >= WORKER.carry || t.hp <= 0) { release(); w.state = w.carry >= WORKER.carry ? 'toCounter' : 'toTree'; }
         }
         break;
       }
-      case 'deliver':
-        if (this.moveTo(w, ZONES.marketSell.x, ZONES.marketSell.y, dt, 6)) { w.state = 'drop'; w.t = 0; }
+      case 'toCounter':
+        if (go(DEPOSIT_ZONE.x + ((w.id % 3) - 1) * 1.1, DEPOSIT_ZONE.z, 0.15)) { w.state = 'drop'; w.t = 0; }
         break;
       case 'drop':
+        w.moving = false;
+        w.face = turnTo(w.face, 0, dt * 8);
         w.t += dt;
-        if (w.t >= 0.12) {
+        if (w.t >= 0.15 && this.counterLogs < COUNTER_MAX) {
           w.t = 0;
           w.carry--;
-          this.cash += RES_VALUE.wood;
-          this.fly('wood', w.x, w.y - 30 - w.carry * 7, ZONES.marketSell.x, ZONES.marketSell.y - 30);
-          if (w.carry <= 0) { w.carry = 0; w.state = 'seek'; }
+          this.counterLogs++;
+          this.events.push({ type: 'fly', kind: 'log', x0: w.x, y0: 1.5, z0: w.z, x1: COUNTER.x, y1: 1.3, z1: COUNTER.z });
+          if (w.carry <= 0) { w.carry = 0; w.state = 'toTree'; }
         }
         break;
     }
-  }
-
-  // ---------- fx ----------
-
-  stackTopOffset(): number { return 34 + Math.min(this.player.stack.length, 30) * 6; }
-
-  private fly(kind: CostKey, x0: number, y0: number, x1: number, y1: number): void {
-    this.flyers.push({ kind, x0, y0, x1, y1, t: 0, dur: 0.28 });
-  }
-
-  private coinFloater(n: number): void {
-    const p = this.player;
-    const f = this.floaters.find((fl) => fl.coin !== undefined && fl.t < 0.4);
-    if (f) { f.coin = (f.coin ?? 0) + n; f.text = `+${f.coin}`; f.t = 0; f.x = p.x; f.y = p.y - 70; return; }
-    this.floaters.push({ text: `+${n}`, x: p.x, y: p.y - 70, t: 0, color: '#ffd23f', coin: n });
-  }
-
-  burst(x: number, y: number, color: string, n: number, speed: number, up: number): void {
-    for (let i = 0; i < n; i++) {
-      const a = Math.random() * Math.PI * 2, s = speed * (0.4 + Math.random() * 0.6);
-      this.particles.push({
-        x, y, z: 10, vx: Math.cos(a) * s, vy: Math.sin(a) * s * 0.6, vz: up * (0.5 + Math.random() * 0.5),
-        life: 0.8 + Math.random() * 0.6, color, size: 3 + Math.random() * 4,
-      });
-    }
-  }
-
-  private updateFx(dt: number): void {
-    this.shake = Math.max(0, this.shake - dt);
-    for (const pl of this.plots) pl.pulse = Math.max(0, pl.pulse - dt);
-    for (const f of this.flyers) f.t += dt / f.dur;
-    this.flyers = this.flyers.filter((f) => f.t < 1);
-    for (const f of this.floaters) { f.t += dt; f.y -= 40 * dt; }
-    this.floaters = this.floaters.filter((f) => f.t < 1.1);
-    for (const q of this.particles) {
-      q.life -= dt;
-      q.x += q.vx * dt; q.y += q.vy * dt; q.z += q.vz * dt;
-      q.vz -= 900 * dt;
-      if (q.z < 0) { q.z = 0; q.vz *= -0.35; q.vx *= 0.6; q.vy *= 0.6; }
-    }
-    this.particles = this.particles.filter((q) => q.life > 0);
-    if (this.toast) { this.toast.t += dt; if (this.toast.t > 3.5) this.toast = null; }
   }
 
   // ---------- guidance ----------
 
-  /** Next thing the player should do, used for the hint text and guide arrow. */
-  objective(): { text: string; x: number; y: number } | null {
+  /** Next thing the player should do: hint text plus where the guide arrow points. */
+  objective(): { text: string; x: number; z: number } | null {
     const p = this.player;
-    const next = MAIN_ORDER.map((id) => this.plot(id))
-      .find((pl) => this.plotVisible(pl) && !(isUpgrade(pl.def.id) && this.levels[pl.def.id] > 0));
-    if (!next) {
-      if (this.cash > 0) return { text: T.takeCash, ...ZONES.marketCash };
-      return null;
+    const alive = this.aliveBears();
+    if (alive.length && (this.breached || this.towers.length === 0)) {
+      const b = alive.reduce((a, c) => (dist(a.x, a.z, p.x, p.z) <= dist(c.x, c.z, p.x, p.z) ? a : c));
+      return { text: this.breached ? T.breach : T.defend, x: b.x, z: b.z };
     }
-    const id = next.def.id;
-    const label = id === 'upHire' ? T.hire : fmt(isUpgrade(id) ? T.upgrade : T.build, { b: T.plot[id] });
-    const buildHint = { text: label, x: next.def.x, y: next.def.y };
-    const needed = (['wood', 'stone', 'plank', 'gold'] as Res[]).filter((r) => this.remaining(next, r) > 0);
-    const carried = needed.reduce((n, r) => n + Math.min(this.countInStack(r), this.remaining(next, r)), 0);
-    const total = needed.reduce((n, r) => n + this.remaining(next, r), 0);
     const full = p.stack.length >= this.capacity;
-    // deliver once the backpack is full or already holds everything still missing
-    if (carried > 0 && (full || carried >= total)) return buildHint;
-    if (full && this.isBuilt('market')) return { text: T.sell, ...ZONES.marketSell };
-    if (this.remaining(next, 'coin') > 0 && !needed.length) {
-      if (this.cash > 0 && this.coins < this.remaining(next, 'coin')) return { text: T.takeCash, ...ZONES.marketCash };
-      if (this.coins > 0) return buildHint;
-      // earn coins: gather whatever is closest, sell once the backpack is full
-      return this.nearestNodeHint(null);
+    const next = PAD_ORDER.map((id) => this.pad(id)).find((pd) => this.padVisible(pd) && pd.level === 0);
+    const deliver = { text: T.deliver, x: DEPOSIT_ZONE.x, z: DEPOSIT_ZONE.z };
+    const cash = { text: T.takeCash, x: CASH_ZONE.x, z: CASH_ZONE.z };
+    if (next) {
+      const rem = this.padRemaining(next);
+      if (this.money >= rem) return { text: fmt(T.buy, { b: T.pad[next.def.id] }), x: next.def.x, z: next.def.z };
+      if (this.cashPile > 0 && this.money + this.cashPile >= rem) return cash;
+      const worth = this.money + this.cashPile + (p.stack.length + this.counterLogs) * QUEUE.pricePerLog;
+      if (p.stack.length && (full || worth >= rem)) return deliver;
+      if (this.cashPile > 0 && !p.stack.length) return cash;
+    } else if (this.cashPile > 0 && !p.stack.length) return cash;
+    if (full) return deliver;
+    let best: Tree | null = null, bestD = Infinity;
+    for (const t of this.trees) {
+      if (t.hp <= 0) continue;
+      const d = dist(t.x, t.z, p.x, p.z);
+      if (d < bestD) { best = t; bestD = d; }
     }
-    const r = needed.find((res) => this.countInStack(res) < this.remaining(next, res));
-    if (!r) return buildHint;
-    if (r === 'plank') {
-      if (this.sawOut > 0) return { text: T.takePlanks, ...ZONES.sawOut };
-      if (this.countInStack('wood') > 0 || this.sawIn > 0) return { text: T.feedSaw, ...ZONES.sawIn };
-      return this.nearestNodeHint('tree');
-    }
-    return this.nearestNodeHint(r === 'wood' ? 'tree' : r === 'stone' ? 'rock' : 'gold');
-  }
-
-  /** Nearest harvestable node of a kind (any kind when null). */
-  private nearestNodeHint(kind: NodeKind | null): { text: string; x: number; y: number } | null {
-    const p = this.player;
-    let best: ResNode | null = null, bestD = Infinity;
-    for (const n of this.nodes) {
-      if ((kind && n.kind !== kind) || n.hp <= 0 || !this.islandUnlocked(n.island)) continue;
-      const d = Math.hypot(n.x - p.x, n.y - p.y);
-      if (d < bestD) { best = n; bestD = d; }
-    }
-    return best ? { text: fmt(T.collect, { r: T.res[NODE_INFO[best.kind].res] }), x: best.x, y: best.y } : null;
+    return best ? { text: next ? T.chop : T.free, x: best.x, z: best.z } : null;
   }
 
   // ---------- persistence ----------
 
   serialize(): SaveData {
-    const plots: SaveData['plots'] = {};
-    for (const pl of this.plots) plots[pl.def.id] = { paid: { ...pl.paid }, built: pl.built };
+    const pads: SaveData['pads'] = {};
+    for (const p of this.pads) pads[p.def.id] = { level: p.level, paid: p.paid };
     return {
-      v: 1, coins: this.coins, cash: this.cash, levels: { ...this.levels }, plots,
-      stack: this.player.stack.map((s) => s.res), px: this.player.x, py: this.player.y,
-      sawIn: this.sawIn, sawOut: this.sawOut, won: this.won, savedAt: Date.now(),
+      v: 2, money: this.money, cashPile: this.cashPile, counterLogs: this.counterLogs, pads,
+      stack: this.player.stack.length, px: this.player.x, pz: this.player.z, wave: this.wave,
+      waveTimer: this.waveActive ? 20 : this.waveTimer, wallHp: this.wallHp, savedAt: Date.now(),
     };
   }
 
   load(d: SaveData): void {
-    this.coins = d.coins;
-    this.cash = d.cash;
-    Object.assign(this.levels, d.levels);
-    for (const pl of this.plots) {
-      const s = d.plots[pl.def.id];
-      if (s) { pl.paid = { ...s.paid }; pl.built = s.built; }
+    if (d.v !== 2) return;
+    this.money = d.money;
+    this.cashPile = d.cashPile;
+    this.counterLogs = d.counterLogs;
+    for (const p of this.pads) {
+      const s = d.pads[p.def.id];
+      if (!s) continue;
+      p.level = Math.min(s.level, p.def.max);
+      p.paid = s.paid;
+      if (p.def.id.startsWith('tower') && p.level > 0) {
+        this.towers.push({ id: p.def.id, x: p.def.x, z: p.def.z, cd: 0, aim: -Math.PI / 2, recoil: 0 });
+      }
     }
-    this.player.stack = d.stack.slice(0, this.capacity).map((res) => ({ res, anim: 1, fx: 0, fy: 0 }));
-    if (this.walkable(d.px, d.py)) { this.player.x = d.px; this.player.y = d.py; }
-    this.sawIn = d.sawIn;
-    this.sawOut = d.sawOut;
-    this.won = d.won;
-    for (let i = 0; i < this.levels.upHire; i++) this.spawnWorker();
+    for (let i = 0; i < this.level('worker'); i++) this.spawnWorker();
+    this.player.stack = Array.from({ length: Math.min(d.stack, this.capacity) }, () => ({ anim: 1, fx: 0, fy: 0, fz: 0 }));
+    if (!this.blocked(d.px, d.pz, PLAYER.radius)) { this.player.x = d.px; this.player.z = d.pz; }
+    this.wave = d.wave;
+    this.waveTimer = Math.max(15, d.waveTimer);
+    this.wallHp = d.wallHp;
 
-    // idle earnings: workers keep chopping (about half their online rate) while the app is closed, capped at 2h
+    // lumberjacks keep supplying survivors while the game is closed (about half the online rate, max 2h)
     const away = Math.min(2 * 3600, (Date.now() - d.savedAt) / 1000);
-    if (away > 60 && this.levels.upHire > 0) {
-      const earned = Math.floor(away * this.levels.upHire * 0.1);
-      this.cash += earned;
-      this.toast = { text: T.welcome, sub: `+${earned} 🪙`, t: 0 };
+    const workers = this.level('worker');
+    if (away > 60 && workers > 0) {
+      const earned = Math.floor(away * workers * 0.25);
+      this.cashPile += earned;
+      this.events.push({ type: 'toast', text: T.welcome, sub: `+$${earned}` });
     }
   }
 }
 
+function turnTo(a: number, b: number, k: number): number {
+  let d = b - a;
+  while (d > Math.PI) d -= Math.PI * 2;
+  while (d < -Math.PI) d += Math.PI * 2;
+  return a + d * Math.min(1, k);
+}

@@ -1212,7 +1212,7 @@ export class Game {
     const r = Math.random;
     const got: Price = free
       ? { em: 3 + Math.floor(r() * 6), di: Math.floor(r() * 3) }
-      : { em: 8 + Math.floor(r() * 12), di: 2 + Math.floor(r() * 5), ob: r() < 0.35 ? 1 + Math.floor(r() * 3) : 0 };
+      : { ...CHEST.reward };
     addGems(this.profile, got);
     sfx('build');
     this.onChange?.();

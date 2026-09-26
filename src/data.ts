@@ -332,7 +332,13 @@ export const BOOSTS: { id: BoostId; icon: string; price: Price; seconds: number 
   { id: 'repair', icon: '🧱', price: { di: 3 }, seconds: 0 },
 ];
 
-export const CHEST = { price: { em: 20 } as Price, freeEvery: 4 * 3600 * 1000 };
+// The paid chest has a fixed reward on purpose: a purchase with a randomised reward counts as a
+// loot box for IARC and lands the game at 18+ in Brazil and Australia.
+export const CHEST = {
+  price: { em: 20 } as Price,
+  reward: { em: 14, di: 4, ob: 1 } as Price,
+  freeEvery: 4 * 3600 * 1000,
+};
 
 // ---------- daily rewards & quests ----------
 

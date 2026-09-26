@@ -122,14 +122,19 @@ Gra dla dzieci podlega programowi „Rodzina” i musiałaby mieć inne ustawien
 
 **Ankieta klasyfikacji treści (IARC):**
 - Kategoria: Gra
-- Przemoc: tak, fantastyczna/kreskówkowa przemoc wobec potworów, bez krwi i bez ludzi jako celów
-- Strach, seks, wulgaryzmy, narkotyki, hazard za prawdziwe pieniądze: nie
+- Przemoc: tak, wobec istot innych niż ludzie. Kontekst fikcyjny, styl kreskówkowy, reakcje nierealistyczne,
+  przemoc często pokazywana z daleka, bez krwi, stworzenia nie zachowują się jak ludzie.
+  Wymierzona w rzeczywiste zwierzęta: **tak** — wśród potworów są niedźwiedź, goryl, pantera, hiena, krokodyl i skorpion.
+- Strach, seks, wulgaryzmy, narkotyki, hazard: nie
 - Interakcja użytkowników / czat: nie
 - Udostępnianie lokalizacji: nie
-- Zakupy cyfrowe: tak
-- Zakupy w grze z losowymi przedmiotami: **tak**. Skrzynia kosztuje 20 szmaragdów, a szmaragdy można też kupić za prawdziwe pieniądze.
-  Google wymaga wtedy podania szans na nagrody. Gra pokazuje je w Sklepie → Skrzynie.
-- Spodziewany wynik: PEGI 7 / USK 6 / ESRB Everyone 10+
+- Zakupy cyfrowe: tak — tylko „Zakupy towarów cyfrowych". Nagrody wymienialne na pieniądze i NFT: nie.
+- Zakupy w grze z losowymi przedmiotami: **nie**. Płatna skrzynia ma z góry ustaloną zawartość (`CHEST.reward` w `src/data.ts`).
+  Losowa jest tylko skrzynia darmowa, a jej się nie kupuje, więc nie jest to loot box.
+  **Nie wolno tego zmienić z powrotem na losowe:** przy odpowiedzi „tak" Brazylia (ClassInd) i Australia (ACB)
+  dają od razu 18+/M, mimo że treść gry jest łagodna.
+- Wymiana przedmiotów za prawdziwe pieniądze: nie
+- Spodziewany wynik: PEGI 7 / USK 6 / ESRB Everyone, w Brazylii i Australii bez ograniczeń wiekowych
 
 **Aplikacja dotycząca zdrowia / finansów / wiadomości / rządowa:** nie.
 

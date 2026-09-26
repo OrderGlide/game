@@ -61,7 +61,7 @@ const CSS = `
   display: flex; align-items: center; gap: 4px; }
 
 /* menus */
-#hud .overlay { position: absolute; inset: 0; background: rgba(10,16,30,.45); display: none; pointer-events: auto; align-items: flex-end; justify-content: center; }
+#hud .overlay { position: absolute; inset: 0; z-index: 5; background: rgba(10,16,30,.45); display: none; pointer-events: auto; align-items: flex-end; justify-content: center; }
 #hud .overlay.open { display: flex; }
 #hud .panel { width: min(460px, 100%); max-height: min(78vh, 680px); background: #1c2740; border-radius: 22px 22px 0 0; padding: 16px 16px calc(env(safe-area-inset-bottom) + 16px);
   box-shadow: 0 -6px 30px rgba(0,0,0,.35); display: flex; flex-direction: column; gap: 12px; animation: up .22s ease-out; }

@@ -57,7 +57,12 @@ jobs:
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/upload.jks"
+          # strip any stray whitespace the secret picked up when it was pasted (Windows line endings)
+          printf '%s' "${{ secrets.KEYSTORE_BASE64 }}" | tr -d '[:space:]' | base64 -d > "$RUNNER_TEMP/upload.jks"
+          if [ ! -s "$RUNNER_TEMP/upload.jks" ]; then
+            echo "::error::KEYSTORE_BASE64 did not decode to a keystore. Re-copy the .b64 file into the secret."
+            exit 1
+          fi
           KEYSTORE_PATH="$RUNNER_TEMP/upload.jks" ./gradlew bundleRelease --no-daemon
 
       - uses: actions/upload-artifact@v4

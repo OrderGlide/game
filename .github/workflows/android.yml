@@ -4,7 +4,7 @@ name: Android build
 # when the signing secrets are configured (see README → "Automatyczne budowanie").
 on:
   push:
-    branches: [main, 'claude/**']
+    branches: [main]
   workflow_dispatch:
 
 jobs:

@@ -142,7 +142,9 @@ Gotowa polityka (PL + EN) jest w [`docs/privacy-policy.html`](docs/privacy-polic
 Adres kontaktowy to alias przekierowujący na prywatną skrzynkę — można go wymienić w jednym miejscu w pliku.
 
 Google wymaga publicznego adresu URL. Wystawiamy ją przez **GitHub Pages**:
-Settings → Pages → Source: *Deploy from a branch*, gałąź domyślna, folder `/docs`.
+Settings → Pages → Source: *Deploy from a branch*, gałąź `main`, folder `/docs`.
+Gdy repozytorium gry jest prywatne, te same dwa pliki leżą w osobnym publicznym repozytorium `coldvain`
+i to ono serwuje stronę — po zmianie polityki skopiuj `docs/index.html` i `docs/privacy-policy.html` także tam.
 
 - Strona: https://orderglide.github.io/game/
 - Polityka (ten link idzie do Play Console): https://orderglide.github.io/game/privacy-policy.html

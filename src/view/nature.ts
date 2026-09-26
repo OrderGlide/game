@@ -4,7 +4,8 @@ import { CAMP, COUNTER, FOREST_PEN, MINE_PEN, mulberry32, type Gem, type TreeKin
 import { P, glowMat, mat, merged, vertexMat, type Part } from './models';
 import type { Theme } from './theme';
 
-const S = (r: number, w = 10, h = 8) => new THREE.SphereGeometry(r, w, h);
+/** Spheres get fewer segments the smaller they are: tiny eyes and flowers do not need 160 triangles. */
+const S = (r: number, w = r < 0.2 ? 6 : r < 0.5 ? 8 : 10, h = r < 0.2 ? 4 : r < 0.5 ? 6 : 8) => new THREE.SphereGeometry(r, w, h);
 const C = (rt: number, rb: number, h: number, seg = 8) => new THREE.CylinderGeometry(rt, rb, h, seg);
 const K = (r: number, h: number, seg = 8) => new THREE.ConeGeometry(r, h, seg);
 const B = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d);
@@ -48,9 +49,9 @@ export function treeGeometries(kind: TreeKind): { foliage: THREE.BufferGeometry;
     case 'jungle': return {
       foliage: merged([
         P(C(0.2, 0.26, 2.2, 7), 0x6b4a2a, [0, 2.1, 0]),
-        P(S(1.2, 10, 8), 0x2e8a3a, [0, 3.4, 0], undefined, [1.2, 0.7, 1.2]),
-        P(S(0.9, 10, 8), 0x3fa84a, [0.6, 3.8, 0.3], undefined, [1, 0.7, 1]),
-        P(S(0.85, 10, 8), 0x2a7a34, [-0.6, 3.7, -0.3], undefined, [1, 0.7, 1]),
+        P(S(1.2, 8, 6), 0x2e8a3a, [0, 3.4, 0], undefined, [1.2, 0.7, 1.2]),
+        P(S(0.9, 8, 6), 0x3fa84a, [0.6, 3.8, 0.3], undefined, [1, 0.7, 1]),
+        P(S(0.85, 8, 6), 0x2a7a34, [-0.6, 3.7, -0.3], undefined, [1, 0.7, 1]),
         P(C(0.03, 0.03, 1.4, 4), 0x3d8a2a, [0.9, 2.6, 0.4]),
         P(C(0.03, 0.03, 1.1, 4), 0x3d8a2a, [-0.8, 2.8, -0.5]),
         P(S(0.12), 0xff5fa2, [0.5, 3.1, 1.0]),
@@ -71,8 +72,8 @@ export function treeGeometries(kind: TreeKind): { foliage: THREE.BufferGeometry;
       return {
         foliage: merged([
           P(C(0.2, 0.26, 1.6, 7), 0x4a3a2a, [0, 1.8, 0]),
-          P(S(1.15, 10, 8), 0x6b8a30, [0, 3.0, 0], undefined, [1.1, 0.6, 1.1]),
-          P(S(0.8, 10, 8), 0x86a444, [0.2, 3.35, 0.1], undefined, [1, 0.6, 1]),
+          P(S(1.15, 8, 6), 0x6b8a30, [0, 3.0, 0], undefined, [1.1, 0.6, 1.1]),
+          P(S(0.8, 8, 6), 0x86a444, [0.2, 3.35, 0.1], undefined, [1, 0.6, 1]),
           ...strands,
         ]),
         trunk: merged([P(C(0.26, 0.36, 1.0, 7), 0x4a3a2a, [0, 0.5, 0]), P(C(0.26, 0.26, 0.02, 7), 0xb8946a, [0, 1.0, 0])]),
@@ -188,8 +189,8 @@ export function buildDecor(world: WorldId, theme: Theme, scene: THREE.Object3D, 
       break;
     case 'jungle':
       place(merged([
-        P(S(0.8, 10, 8), 0x2e8a3a, [0, 0.4, 0], undefined, [1.2, 0.7, 1.2]),
-        P(S(0.5, 10, 8), 0x46b95c, [0.4, 0.6, 0.2]),
+        P(S(0.8, 8, 6), 0x2e8a3a, [0, 0.4, 0], undefined, [1.2, 0.7, 1.2]),
+        P(S(0.5, 8, 6), 0x46b95c, [0.4, 0.6, 0.2]),
         P(S(0.12), 0xff5fa2, [0.3, 0.9, 0.5]),
         P(S(0.1), 0xffd23f, [-0.5, 0.7, 0.3]),
       ]), vertexMat(), spots(60, 1), 0.7, 1.5);

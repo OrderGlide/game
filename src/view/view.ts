@@ -1,8 +1,8 @@
 // Three.js scene: builds the current world and mirrors the game state every frame.
 import * as THREE from 'three';
 import {
-  CAMPFIRE, CASH_ZONE, COUNTER, DEPOSIT_ZONE, FOREST_PEN, FORGE_ZONE, GATES, MINE_PEN, PAD_SIZE, TENT_SPOTS, TOOL_TIERS, WORLDS,
-  fenceBoxes, mulberry32, type Gem, type PadId, type Price, type SurvivorKind, type TowerKind,
+  BOSS, CAMP, CAMPFIRE, CASH_ZONE, COUNTER, DEPOSIT_ZONE, FOREST_PEN, FORGE_ZONE, GATES, MINE_PEN, PAD_SIZE, TENT_SPOTS, TOOL_TIERS,
+  VARIANTS, WORLDS, fenceBoxes, mulberry32, towerTier, wallTier, type Box, type Gem, type PadId, type Price, type SurvivorKind, type TowerKind,
 } from '../data';
 import { formatNum, type Game, type GameEvent, type PadState } from '../game';
 import { skinDef, type Quality } from '../profile';
@@ -31,7 +31,7 @@ interface PadView {
   plate: THREE.Mesh; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture;
   icon: THREE.Group; label: THREE.Sprite; lctx: CanvasRenderingContext2D; ltex: THREE.CanvasTexture; key: string;
 }
-interface EnemyView { rig: EnemyRig; hpBg: THREE.Sprite; hpFill: THREE.Sprite; }
+interface EnemyView { rig: EnemyRig; hpBg: THREE.Sprite; hpFill: THREE.Sprite; scale: number; shield?: THREE.Mesh; stars?: THREE.Group; }
 interface Bubble { sprite: THREE.Sprite; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; key: string; }
 
 const tmpM = new THREE.Matrix4();
@@ -46,6 +46,14 @@ const Y = new THREE.Vector3(0, 1, 0);
 function setInst(m: THREE.InstancedMesh, i: number, x: number, y: number, z: number, ry: number, s = 1, rx = 0, rz = 0): void {
   tmpQ.setFromEuler(tmpE.set(rx, ry, rz));
   m.setMatrixAt(i, tmpM.compose(tmpP.set(x, y, z), tmpQ, tmpS.set(s, s, s)));
+}
+
+/** Frees the GPU buffers of a model that owns its geometry (towers, gates, boss effects). */
+function disposeTree(o: THREE.Object3D): void {
+  o.traverse((c) => {
+    const m = c as THREE.Mesh;
+    if (m.isMesh) m.geometry.dispose();
+  });
 }
 
 function easeOutBack(t: number): number {
@@ -157,7 +165,12 @@ export class View {
   private workers = new Map<number, CharacterRig>();
   private workerLogs!: THREE.InstancedMesh;
   private enemies = new Map<number, EnemyView>();
-  private towers = new Map<PadId, { rig: TowerRig; t: number }>();
+  private towers = new Map<PadId, { rig: TowerRig; t: number; tier: number }>();
+  private campFence: THREE.InstancedMesh | null = null;
+  private campFenceSpots: { x: number; z: number; r: number; h: number }[] = [];
+  private wallKey = '';
+  private slamWarn!: { root: THREE.Group; fill: THREE.Mesh };
+  private shock!: { mesh: THREE.Mesh; t: number };
   private bolts = new Map<number, THREE.Mesh>();
   private boltGeo = boltGeometries();
   private petRig: PetRig | null = null;
@@ -269,6 +282,8 @@ export class View {
     this.bolts.clear();
     this.pads.clear();
     this.gates = [];
+    this.campFence = null;
+    this.wallKey = '';
     this.bubbles = [];
     this.flyers = [];
     this.particles = [];
@@ -334,6 +349,26 @@ export class View {
     this.pointer.rotation.x = -Math.PI / 2;
     s.add(this.pointer);
 
+    // boss slam: a red warning ring on the ground, then an expanding shockwave
+    const ringMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.85, depthWrite: false });
+    const fillMat = new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.3, depthWrite: false });
+    const warn = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.RingGeometry(BOSS.slamRadius - 0.18, BOSS.slamRadius, 40), ringMat);
+    const fill = new THREE.Mesh(new THREE.CircleGeometry(BOSS.slamRadius, 40), fillMat);
+    ring.rotation.x = fill.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.07;
+    fill.position.y = 0.06;
+    warn.add(ring, fill);
+    warn.visible = false;
+    s.add(warn);
+    this.slamWarn = { root: warn, fill };
+    const shock = new THREE.Mesh(new THREE.RingGeometry(0.8, 1, 40), new THREE.MeshBasicMaterial({ color: 0xfff0c0, transparent: true, depthWrite: false }));
+    shock.rotation.x = -Math.PI / 2;
+    shock.position.y = 0.08;
+    shock.visible = false;
+    s.add(shock);
+    this.shock = { mesh: shock, t: -9 };
+
     this.ambient = this.buildAmbient(th);
     this.camTarget.set(game.player.x, 0, game.player.z);
     this.applyQuality(this.quality);
@@ -368,31 +403,30 @@ export class View {
 
   private buildCamp(th: Theme): void {
     const s = this.scene;
-    const positions: [number, number][] = [];
-    for (const b of fenceBoxes()) {
-      const horiz = b.w > b.d, len = horiz ? b.w : b.d;
-      const n = Math.max(1, Math.round(len / 0.64));
-      for (let i = 0; i < n; i++) {
-        const t = (i + 0.5) / n - 0.5;
-        positions.push(horiz ? [b.x + t * len, b.z] : [b.x, b.z + t * len]);
+    // the pens keep plain log fences; the camp palisade is rebuilt as it gets upgraded
+    const posts = (boxes: Box[]) => {
+      const out: { x: number; z: number; r: number; h: number }[] = [];
+      const rnd = mulberry32(11);
+      for (const b of boxes) {
+        const horiz = b.w > b.d, len = horiz ? b.w : b.d;
+        const n = Math.max(1, Math.round(len / 0.64));
+        for (let i = 0; i < n; i++) {
+          const t = (i + 0.5) / n - 0.5;
+          out.push({ x: horiz ? b.x + t * len : b.x, z: horiz ? b.z : b.z + t * len, r: horiz ? 0 : Math.PI / 2, h: rnd() });
+        }
       }
-    }
-    const fence = new THREE.InstancedMesh(fenceLogGeometry(th.fence, th.fenceTop), vertexMat(), positions.length);
-    const rnd = mulberry32(11);
-    positions.forEach(([x, z], i) => {
-      tmpQ.setFromEuler(tmpE.set(0, rnd() * 6, 0));
-      fence.setMatrixAt(i, tmpM.compose(tmpP.set(x, 0, z), tmpQ, tmpS.set(1, 0.9 + rnd() * 0.2, 1)));
+      return out;
+    };
+    const inCamp = (b: Box) => Math.abs(b.x) <= CAMP.half + 0.1 && Math.abs(b.z) <= CAMP.half + 0.1;
+    const pen = posts(fenceBoxes().filter((b) => !inCamp(b)));
+    this.campFenceSpots = posts(fenceBoxes().filter(inCamp));
+    const fence = new THREE.InstancedMesh(fenceLogGeometry(th.fence, th.fenceTop), vertexMat(), pen.length);
+    pen.forEach((q, i) => {
+      tmpQ.setFromEuler(tmpE.set(0, q.h * 6, 0));
+      fence.setMatrixAt(i, tmpM.compose(tmpP.set(q.x, 0, q.z), tmpQ, tmpS.set(1, 0.9 + q.h * 0.2, 1)));
     });
     fence.castShadow = fence.receiveShadow = true;
     s.add(fence);
-
-    for (const g of Object.values(GATES)) {
-      const rig = makeGate(g.half * 2, th.gate, th.fence, th.fenceTop);
-      rig.root.position.set(g.x, 0, g.z);
-      if (!g.alongX) rig.root.rotation.y = Math.PI / 2;
-      s.add(rig.root);
-      this.gates.push({ rig, x: g.x, z: g.z, open: 0 });
-    }
 
     const counter = makeCounter(th.fence);
     counter.position.set(COUNTER.x, 0, COUNTER.z);
@@ -408,6 +442,43 @@ export class View {
     s.add(this.zoneMarker(DEPOSIT_ZONE.x, DEPOSIT_ZONE.z, DEPOSIT_ZONE.w, DEPOSIT_ZONE.d, 'log'));
     s.add(this.zoneMarker(CASH_ZONE.x, CASH_ZONE.z, CASH_ZONE.w, CASH_ZONE.d, 'cash'));
     s.add(this.zoneMarker(FORGE_ZONE.x, FORGE_ZONE.z, FORGE_ZONE.w, FORGE_ZONE.d, 'forge'));
+  }
+
+  /** Rebuilds the camp palisade and its gates for the current wall level. */
+  private updateWalls(g: Game): void {
+    const level = g.level('wall'), tier = wallTier(level);
+    const key = `${tier}|${level}`;
+    if (key === this.wallKey) return;
+    const first = this.wallKey === '';
+    this.wallKey = key;
+    const th = this.theme;
+    if (this.campFence) { this.scene.remove(this.campFence); this.campFence.geometry.dispose(); this.campFence.dispose(); }
+    const spots = this.campFenceSpots;
+    const fence = new THREE.InstancedMesh(fenceLogGeometry(th.fence, th.fenceTop, tier), vertexMat(), spots.length);
+    const grow = 1 + 0.035 * level;
+    spots.forEach((q, i) => {
+      // stone walls alternate heights into battlements, logs get a random twist and height
+      const hy = tier === 3 ? (i % 2 ? 1.14 : 1) : 0.9 + q.h * 0.2;
+      tmpQ.setFromEuler(tmpE.set(0, tier === 3 ? q.r : q.h * 6, 0));
+      fence.setMatrixAt(i, tmpM.compose(tmpP.set(q.x, 0, q.z), tmpQ, tmpS.set(1, hy * grow, 1)));
+    });
+    fence.castShadow = fence.receiveShadow = true;
+    this.scene.add(fence);
+    this.campFence = fence;
+
+    const open = this.gates.map((gt) => gt.open);
+    for (const gt of this.gates) { this.scene.remove(gt.rig.root); disposeTree(gt.rig.root); }
+    this.gates = Object.values(GATES).map((gd, i) => {
+      const rig = makeGate(gd.half * 2, th.gate, th.fence, th.fenceTop, tier);
+      rig.root.position.set(gd.x, 0, gd.z);
+      if (!gd.alongX) rig.root.rotation.y = Math.PI / 2;
+      this.scene.add(rig.root);
+      return { rig, x: gd.x, z: gd.z, open: open[i] ?? 0 };
+    });
+    if (!first) {
+      // a burst of dust along the whole palisade shows the upgrade
+      for (let i = 0; i < spots.length; i += 4) this.burst(spots[i].x, 1, spots[i].z, i % 8 ? 0xffffff : 0xffd23f, 2, 3);
+    }
   }
 
   private zoneMarker(x: number, z: number, w: number, d: number, icon: 'log' | 'cash' | 'forge'): THREE.Mesh {
@@ -598,6 +669,11 @@ export class View {
         case 'forge': hud.openForge(); break;
         case 'worldComplete': hud.worldComplete(); break;
         case 'offline': hud.showOffline(e.amount); break;
+        case 'slam':
+          this.shock.t = this.time;
+          this.shock.mesh.position.x = e.x;
+          this.shock.mesh.position.z = e.z;
+          break;
       }
     }
     events.length = 0;
@@ -630,6 +706,7 @@ export class View {
     this.sun.position.set(this.camTarget.x - 10, 26, this.camTarget.z + 8);
     this.sun.target.position.copy(this.camTarget);
 
+    this.updateWalls(g);
     this.updatePlayer(g, t);
     this.updatePet(g, t);
     this.updateTents(g);
@@ -897,33 +974,64 @@ export class View {
       seen.add(b.id);
       let v = this.enemies.get(b.id);
       if (!v) {
-        const rig = makeEnemy(b.kind);
-        if (b.boss) { rig.root.scale.setScalar(2.1); rig.crown.visible = true; }
+        const rig = makeEnemy(b.kind, b.variant);
+        const scale = b.boss ? 2.1 : VARIANTS[b.variant].scale;
+        rig.root.scale.setScalar(scale);
+        // only the top graphics setting pays for creature shadows (each limb is another shadow draw)
+        if (this.quality !== 'high' && !b.boss) rig.root.traverse((o) => { o.castShadow = false; });
+        if (b.boss) rig.crown.visible = true;
         const hpBg = new THREE.Sprite(new THREE.SpriteMaterial({ color: 0x1d2633, depthTest: false }));
-        const hpFill = new THREE.Sprite(new THREE.SpriteMaterial({ color: b.boss ? 0xff5a4f : 0x9be34b, depthTest: false }));
+        const hpFill = new THREE.Sprite(new THREE.SpriteMaterial({ color: b.boss ? 0xff5a4f : b.variant === 'tank' ? 0xffb02e : 0x9be34b, depthTest: false }));
         hpBg.scale.set(b.boss ? 2.4 : 1.3, b.boss ? 0.26 : 0.18, 1);
         hpFill.center.set(0, 0.5);
         hpBg.renderOrder = hpFill.renderOrder = 11;
         this.scene.add(rig.root, hpBg, hpFill);
-        v = { rig, hpBg, hpFill };
+        v = { rig, hpBg, hpFill, scale };
+        if (b.boss) {
+          // translucent energy shield and stun stars
+          v.shield = new THREE.Mesh(new THREE.IcosahedronGeometry(1.25, 1),
+            new THREE.MeshBasicMaterial({ color: 0x8fe8ff, transparent: true, opacity: 0.28, depthWrite: false, wireframe: false }));
+          v.shield.position.y = 0.95;
+          rig.root.add(v.shield);
+          v.stars = new THREE.Group();
+          for (let i = 0; i < 3; i++) {
+            const st = new THREE.Mesh(new THREE.OctahedronGeometry(0.13), new THREE.MeshBasicMaterial({ color: 0xffe066 }));
+            st.position.set(Math.cos((i / 3) * Math.PI * 2) * 0.55, 0, Math.sin((i / 3) * Math.PI * 2) * 0.55);
+            v.stars.add(st);
+          }
+          v.stars.position.y = rig.height + 0.25;
+          rig.root.add(v.stars);
+        }
         this.enemies.set(b.id, v);
       }
       const { rig, hpBg, hpFill } = v;
       rig.root.position.set(b.x, 0, b.z);
       rig.root.rotation.y = b.face;
+      if (v.shield) {
+        v.shield.visible = b.shield > 0 && b.state !== 'dead';
+        v.shield.scale.setScalar(1 + Math.sin(t * 5) * 0.04);
+        v.shield.rotation.y = t * 0.8;
+        (v.shield.material as THREE.MeshBasicMaterial).opacity = 0.16 + 0.2 * (b.shield / Math.max(1, b.maxShield));
+      }
+      if (v.stars) {
+        v.stars.visible = b.stunT > 0;
+        v.stars.rotation.y = t * 5;
+      }
       const attack = b.state === 'attack'
         ? Math.max(0, Math.sin((b.atkT / b.attackEvery) * Math.PI))
         : b.state === 'chase' ? Math.max(0, Math.sin((b.atkT / 1.1) * Math.PI)) : 0;
       animateEnemy(rig, {
-        moving: b.state === 'approach' || (b.state === 'chase' && b.atkT === 0), attack, t: t + b.id, walkT: b.walkT,
+        moving: (b.state === 'approach' || b.state === 'flee' || (b.state === 'chase' && b.atkT === 0)) && b.stunT <= 0,
+        attack: b.slamWarnT > 0 ? 1 - b.slamWarnT / BOSS.slamWarn : attack, t: t + b.id, walkT: b.walkT,
         dead: b.state === 'dead' ? b.deadT + 0.0001 : 0,
       });
       const burn = b.burnT > 0 ? 0.25 + Math.sin(t * 20) * 0.1 : 0;
-      rig.material.emissive.setRGB(b.flash * 0.5 + burn, burn * 0.35, b.slowT > 0 ? 0.35 : 0);
-      const showHp = b.state !== 'dead' && b.hp < b.maxHp;
+      const rage = b.enraged ? 0.18 + Math.sin(t * 8) * 0.08 : 0;
+      rig.material.emissive.setRGB(b.flash * 0.5 + burn + rage, burn * 0.35, b.slowT > 0 ? 0.35 : 0);
+      const showHp = b.state !== 'dead' && b.state !== 'flee' && b.hp < b.maxHp;
       hpBg.visible = hpFill.visible = showHp;
       if (showHp) {
-        const y = rig.height * (b.boss ? 2.1 : 1) + 0.6;
+        const y = rig.height * v.scale + 0.6;
         const full = b.boss ? 2.3 : 1.2;
         hpBg.position.set(b.x, y, b.z);
         hpFill.scale.set(Math.max(0.001, full * Math.max(0, b.hp / b.maxHp)), b.boss ? 0.18 : 0.12, 1);
@@ -931,19 +1039,46 @@ export class View {
         hpFill.position.set(b.x + tmpP.x, y + tmpP.y, b.z + tmpP.z);
       }
     }
+    const boss = g.enemies.find((b) => b.boss && b.slamWarnT > 0);
+    this.slamWarn.root.visible = !!boss;
+    if (boss) {
+      this.slamWarn.root.position.set(boss.x, 0, boss.z);
+      const k = Math.max(0.01, 1 - boss.slamWarnT / BOSS.slamWarn);
+      this.slamWarn.fill.scale.setScalar(k);
+    }
+    const sh = this.shock, age = this.time - sh.t;
+    sh.mesh.visible = age < 0.5;
+    if (sh.mesh.visible) {
+      sh.mesh.scale.setScalar(0.5 + (age / 0.5) * BOSS.slamRadius * 1.1);
+      (sh.mesh.material as THREE.MeshBasicMaterial).opacity = 1 - age / 0.5;
+    }
     for (const [id, v] of this.enemies) {
       if (seen.has(id)) continue;
       this.scene.remove(v.rig.root, v.hpBg, v.hpFill);
       v.rig.material.dispose();
+      v.hpBg.material.dispose();
+      v.hpFill.material.dispose();
+      if (v.shield) { disposeTree(v.shield); (v.shield.material as THREE.Material).dispose(); }
+      if (v.stars) disposeTree(v.stars);
       this.enemies.delete(id);
     }
   }
 
   private updateTowers(g: Game, dt: number, t: number): void {
+    const tier = towerTier(g.level('armory'));
     for (const tw of g.towers) {
       let v = this.towers.get(tw.id);
+      if (v && v.tier !== tier) {
+        // the Armory rebuilt this tower: swap in the new model with a pop
+        this.scene.remove(v.rig.root);
+        disposeTree(v.rig.root);
+        this.burst(tw.x, 1.5, tw.z, 0xffd23f, 16, 5);
+        this.burst(tw.x, 1.5, tw.z, 0xffffff, 10, 4);
+        v = undefined;
+      }
       if (!v) {
-        v = { rig: makeTower(this.theme.fence, this.theme.gate, tw.kind), t: 0 };
+        const existed = this.towers.has(tw.id);
+        v = { rig: makeTower(this.theme.fence, this.theme.gate, tw.kind, tier), t: existed ? 0.35 : 0, tier };
         v.rig.root.position.set(tw.x, 0, tw.z);
         this.scene.add(v.rig.root);
         this.towers.set(tw.id, v);

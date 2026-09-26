@@ -11,7 +11,7 @@ import { billingAvailable, loadPrices, ownedProducts, priceOf, purchase } from '
 import { INTERSTITIAL } from './platform/config';
 
 const SAVE_KEY = 'frost-camp-save-v3';
-const VERSION = '0.4.0';
+const VERSION = '0.5.0';
 
 interface SaveFile { v: 3; profile: ProfileData; camp: CampSave | null; }
 

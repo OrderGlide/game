@@ -69,19 +69,50 @@ export const ENEMIES: Record<EnemyKind, { hp: number; speed: number; wallDamage:
   golem: { hp: 55, speed: 1.7, wallDamage: 7, attackEvery: 1.9 },
   spider: { hp: 32, speed: 3.2, wallDamage: 4, attackEvery: 1.0 },
 };
+/** Fast runners and armoured brutes mix into later waves. */
+export type Variant = 'normal' | 'fast' | 'tank';
+export const VARIANTS: Record<Variant, { hp: number; speed: number; damage: number; scale: number; reward: number }> = {
+  normal: { hp: 1, speed: 1, damage: 1, scale: 1, reward: 1 },
+  fast: { hp: 0.5, speed: 1.8, damage: 0.7, scale: 0.8, reward: 0.8 },
+  tank: { hp: 3.2, speed: 0.72, damage: 2.4, scale: 1.4, reward: 2.5 },
+};
 export const WAVES = {
   firstIn: 90,
-  gap: 60,
-  count: (wave: number) => 2 + Math.floor((wave - 1) * 0.6),
-  hp: (wave: number) => 1.08 ** (wave - 1),
+  gap: 55,
+  count: (wave: number) => 2 + Math.floor((wave - 1) * 0.7),
+  hp: (wave: number) => 1.13 ** (wave - 1),
+  /** Share of fast / tank creatures in a wave. */
+  mix: (wave: number) => ({
+    fast: wave >= 4 ? Math.min(0.35, 0.12 + (wave - 4) * 0.03) : 0,
+    tank: wave >= 7 ? Math.min(0.3, 0.1 + (wave - 7) * 0.025) : 0,
+  }),
   bossEvery: 10,
-  bossHp: 18,
-  bossDamage: 4,
   aggro: 7,
   reward: (wave: number) => 5 + 2 * wave,
+  /** Waves stop counting down after this many seconds without touching the screen. */
+  idlePause: 25,
+  /** A creature that breaks in grabs this share of your cash and runs; catch it to get the cash back. */
+  steal: 0.06,
 };
-export const wallMax = (level: number) => 100 + 60 * level;
+/** Bosses wait until the player summons them, then fight in phases. */
+export const BOSS = {
+  hp: 34, damage: 3, speed: 0.75,
+  /** Seconds before an undefeated boss retreats. */
+  timeLimit: 120,
+  /** Shield in % of max hp; only the player's axes break it, towers deal a fraction meanwhile. */
+  shield: 0.1, shieldAxeMult: 3, shieldedTowerMult: 0.15, stun: 7, stunnedTowerMult: 1.5,
+  /** The boss brings only part of a normal wave with it. */
+  escort: 0.5,
+  slamEvery: 6.5, slamWarn: 1.1, slamRadius: 3.8, slamStun: 1.4,
+  summonAt: [0.66, 0.33], summonCount: 3,
+  enrageAt: 0.3,
+};
+export const wallMax = (level: number) => 150 + 70 * level;
 export const TOWER = { range: 14.5, every: 1.2, damage: 14 };
+/** Each Armory level adds tower damage and makes every tower look sturdier. */
+export const ARMORY_BONUS = 0.3;
+export const towerTier = (armory: number) => Math.min(4, Math.floor(armory / 2));
+export const wallTier = (wall: number) => (wall < 2 ? 0 : wall < 4 ? 1 : wall < 7 ? 2 : 3);
 
 export type TowerKind = 'crossbow' | 'ice' | 'fire' | 'cannon';
 /** Special towers: damage is a multiple of the crossbow's; ice slows, fire burns, cannon hits an area. */
@@ -153,8 +184,8 @@ export function worldAt(n: number): WorldInfo {
 
 // ---------- build pads (cash, per world) ----------
 
-export type PadId = 'tower1' | 'tower2' | 'tower3' | 'tower4' | 'lumber' | 'miner' | 'wall' | 'portal' | 'tent' | 'ice' | 'fire' | 'cannon';
-export type PadIcon = 'tower' | 'lumber' | 'miner' | 'wall' | 'portal' | 'tent' | 'ice' | 'fire' | 'cannon';
+export type PadId = 'tower1' | 'tower2' | 'tower3' | 'tower4' | 'lumber' | 'miner' | 'wall' | 'portal' | 'tent' | 'ice' | 'fire' | 'cannon' | 'armory';
+export type PadIcon = 'tower' | 'lumber' | 'miner' | 'wall' | 'portal' | 'tent' | 'ice' | 'fire' | 'cannon' | 'armory';
 
 export interface PadDef {
   id: PadId; x: number; z: number; icon: PadIcon;
@@ -178,8 +209,9 @@ export const PADS: PadDef[] = [
   { id: 'ice', x: 11.3, z: 9.6, icon: 'ice', requires: ['tower2'], max: 1, cost: () => 600 },
   { id: 'fire', x: 6.3, z: -2.7, icon: 'fire', requires: ['tower4'], max: 1, cost: () => 1500 },
   { id: 'cannon', x: 11.3, z: -9.6, icon: 'cannon', requires: ['tower3'], max: 1, cost: () => 2500 },
+  { id: 'armory', x: 2.2, z: -2.6, icon: 'armory', requires: ['tower2'], max: 8, cost: (l) => Math.round(250 * 2.05 ** l) },
 ];
-export const PAD_ORDER: PadId[] = ['tower1', 'tower2', 'wall', 'lumber', 'tent', 'miner', 'tower3', 'ice', 'tower4', 'portal', 'fire', 'cannon'];
+export const PAD_ORDER: PadId[] = ['tower1', 'tower2', 'wall', 'lumber', 'armory', 'tent', 'miner', 'tower3', 'portal', 'ice', 'tower4', 'fire', 'cannon'];
 export const TOWER_PADS: Partial<Record<PadId, TowerKind>> = {
   tower1: 'crossbow', tower2: 'crossbow', tower3: 'crossbow', tower4: 'crossbow', ice: 'ice', fire: 'fire', cannon: 'cannon',
 };
@@ -230,7 +262,7 @@ export const STATS = {
   pickLevel: (u: Levels) => 1 + u.pick,
   mineInterval: (u: Levels) => 0.55 * 0.9 ** u.pick,
   speed: (u: Levels) => 6 + 0.5 * u.boots,
-  towerMult: (u: Levels) => 1.25 ** u.power,
+  towerMult: (u: Levels) => 1.2 ** u.power,
 };
 
 /** Tool tier colours: wood → stone → iron → gold → diamond → emerald → ruby → amethyst → obsidian → star. */
@@ -315,6 +347,16 @@ export function fenceBoxes(): Box[] {
   horiz(MINE_PEN.x0, -h, MINE_PEN.z1);
   vert(MINE_PEN.z0, MINE_PEN.z1, MINE_PEN.x0);
   return out;
+}
+
+/** Rounds a price to a friendly amount: 396 → 400, 871 → 900, 1916 → 2000. */
+export function nicePrice(n: number): number {
+  if (n < 20) return Math.max(1, Math.round(n));
+  const e = 10 ** Math.floor(Math.log10(n)), m = n / e;
+  const steps = [1, 1.2, 1.5, 2, 2.5, 3, 3.5, 4, 4.5, 5, 6, 7, 7.5, 8, 9, 10];
+  let best = steps[0];
+  for (const st of steps) if (Math.abs(st - m) < Math.abs(best - m)) best = st;
+  return Math.round(best * e);
 }
 
 export function mulberry32(seed: number): () => number {

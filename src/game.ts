@@ -1,10 +1,10 @@
 import {
-  BOOSTS, CAMP, CAMPFIRE, CASH_ZONE, CHEST, COUNTER, COUNTER_MAX, DEPOSIT_ZONE, ENEMIES, FOREST_PEN, FORGE_ZONE, GATES,
+  ARMORY_BONUS, BOSS, BOOSTS, CAMP, CAMPFIRE, CASH_ZONE, CHEST, COUNTER, COUNTER_MAX, DEPOSIT_ZONE, ENEMIES, FOREST_PEN, FORGE_ZONE, GATES,
   GEMS, MINE_PEN, ORES, PADS, PAD_ORDER, PAD_SIZE, PETS, PLAYER, QUEUE, SKINS, STATS, TENT_BONUS, TOWER, TOWER_KINDS, TOWER_PADS,
-  TREE, UPGRADES, WAVES, WORKER,
-  WORLD, dayKey, fenceBoxes, inBox, mulberry32, regionOf, wallMax, worldAt,
+  TREE, UPGRADES, VARIANTS, WAVES, WORKER,
+  WORLD, dayKey, fenceBoxes, inBox, mulberry32, nicePrice, regionOf, wallMax, worldAt,
   type BoostId, type Box, type EnemyKind, type Gem, type PadDef, type PadId, type Price, type Pt, type Region, type Reward,
-  type PetId, type SkinId, type TowerKind, type UpgradeId, type WorldInfo,
+  type PetId, type SkinId, type TowerKind, type UpgradeId, type Variant, type WorldInfo,
 } from './data';
 import { AD_COOLDOWN, PRODUCTS, type ProductId } from './platform/config';
 import {
@@ -24,12 +24,19 @@ export interface Survivor {
   state: 'walk' | 'wait' | 'leave'; serveT: number; walkT: number; face: number; path: Pt[];
 }
 export interface Enemy {
-  id: number; kind: EnemyKind; boss: boolean; x: number; z: number; hp: number; maxHp: number; homeZ: number;
+  id: number; kind: EnemyKind; variant: Variant; boss: boolean; x: number; z: number; hp: number; maxHp: number; homeZ: number;
   speed: number; damage: number; attackEvery: number;
-  state: 'spawn' | 'approach' | 'attack' | 'chase' | 'dead';
+  state: 'spawn' | 'approach' | 'attack' | 'chase' | 'flee' | 'dead';
   delay: number; atkT: number; flash: number; hitT: number; deadT: number; face: number; walkT: number;
   slowT: number; burnT: number; burnDps: number;
+  /** Cash stolen from the camp; dropped again when the creature dies. */
+  loot: number;
+  // boss only
+  shield: number; maxShield: number; stunT: number; slamT: number; slamWarnT: number; summons: number; enraged: boolean;
 }
+
+/** Creatures that can fight, be targeted and be hit (thieves running off with loot can still be caught). */
+export const fighting = (b: Enemy) => b.state !== 'dead' && b.state !== 'spawn' && (b.state !== 'flee' || b.loot > 0);
 export interface Tower { id: PadId; kind: TowerKind; x: number; z: number; cd: number; aim: number; recoil: number; }
 export interface Bolt {
   id: number; kind: TowerKind; x: number; y: number; z: number; dx: number; dy: number; dz: number; target: number; dmg: number;
@@ -53,6 +60,7 @@ export type GameEvent =
   | { type: 'forge' }
   | { type: 'worldComplete' }
   | { type: 'waveCleared' }
+  | { type: 'slam'; x: number; z: number; r: number }
   | { type: 'offline'; amount: number }
   | { type: 'tutorial'; step: number };
 
@@ -62,6 +70,9 @@ export interface CampSave {
   stack: number; px: number; pz: number; wave: number; waveTimer: number; wallHp: number;
   bossDefeated: boolean; worldDone: boolean; savedAt: number;
 }
+
+/** Offline earnings stop growing after this many seconds. */
+export const OFFLINE_MAX = 4 * 3600;
 
 const dist = (ax: number, az: number, bx: number, bz: number) => Math.hypot(ax - bx, az - bz);
 
@@ -97,7 +108,7 @@ export class Game {
   player = {
     x: PLAYER.start.x, z: PLAYER.start.z, face: Math.PI, moving: false, walkT: 0,
     stack: [] as StackLog[], chopT: 0, target: null as Tree | null, mining: null as Ore | null, mineT: 0,
-    hurtT: 0, kx: 0, kz: 0, axeAngle: 0, lockT: 0,
+    hurtT: 0, kx: 0, kz: 0, axeAngle: 0, lockT: 0, stunT: 0,
   };
   money = 0;
   cashPile = 0;
@@ -119,6 +130,10 @@ export class Game {
   bossDefeated = false;
   worldDone = false;
   time = 0;
+  /** Seconds since the player last touched the joystick. */
+  idleT = 0;
+  /** Seconds the current boss has been fighting. */
+  bossTimer = 0;
   events: GameEvent[] = [];
   onChange: (() => void) | null = null;
   /** Clock for boosts and chests; the simulation bot can override it. */
@@ -172,7 +187,13 @@ export class Game {
   get speed(): number { return STATS.speed(this.lv) * (this.boostActive('speed') ? 1.6 : 1); }
   get pickLevel(): number { return STATS.pickLevel(this.lv); }
   get wallMax(): number { return wallMax(this.level('wall')); }
-  get towerDamage(): number { return TOWER.damage * STATS.towerMult(this.lv) * this.world.towerMult; }
+  get towerDamage(): number {
+    return TOWER.damage * STATS.towerMult(this.lv) * this.world.towerMult * (1 + ARMORY_BONUS * this.level('armory'));
+  }
+  /** Every 10th wave waits for the player to summon its boss. */
+  get bossWaiting(): boolean { return !this.waveActive && this.wave % WAVES.bossEvery === 0; }
+  /** Waves hold off while the player has put the phone down. */
+  get wavesPaused(): boolean { return !this.waveActive && !this.bossWaiting && this.idleT > WAVES.idlePause; }
   get logPrice(): number {
     return QUEUE.pricePerLog * this.world.priceMult * (1 + TENT_BONUS * this.level('tent')) * (this.boostActive('cash') ? 2 : 1);
   }
@@ -195,7 +216,7 @@ export class Game {
         em: (c.em ?? 0) * k, di: (c.di ?? 0) * k, ob: (c.ob ?? 0) * k,
       };
     }
-    return { cash: Math.round(p.def.cost(p.level) * this.world.priceMult) };
+    return { cash: nicePrice(p.def.cost(p.level) * this.world.priceMult) };
   }
 
   padRemaining(p: PadState): Price {
@@ -226,8 +247,8 @@ export class Game {
     spendGems(this.profile, price);
   }
 
-  aliveEnemies(): Enemy[] { return this.enemies.filter((b) => b.state !== 'dead' && b.state !== 'spawn'); }
-  boss(): Enemy | undefined { return this.enemies.find((e) => e.boss && e.state !== 'dead' && e.state !== 'spawn'); }
+  aliveEnemies(): Enemy[] { return this.enemies.filter(fighting); }
+  boss(): Enemy | undefined { return this.enemies.find((e) => e.boss && fighting(e)); }
 
   blocked(x: number, z: number, r: number): boolean {
     if (x < WORLD.minX || x > WORLD.maxX || z < WORLD.minZ || z > WORLD.maxZ) return true;
@@ -250,6 +271,7 @@ export class Game {
 
   update(dt: number, dir: { x: number; z: number }): void {
     this.time += dt;
+    this.idleT = Math.hypot(dir.x, dir.z) > 0.1 ? 0 : this.idleT + dt;
     this.updatePlayer(dt, dir);
     this.updateTrees(dt);
     this.updateOres(dt);
@@ -273,6 +295,10 @@ export class Game {
     const p = this.player;
     p.hurtT = Math.max(0, p.hurtT - dt);
     p.lockT = Math.max(0, p.lockT - dt);
+    // a boss slam knocks the player out for a moment
+    const stunned = p.stunT > 0;
+    p.stunT = Math.max(0, p.stunT - dt);
+    if (stunned) dir = { x: 0, z: 0 };
     const decay = Math.exp(-7 * dt);
     p.kx *= decay;
     p.kz *= decay;
@@ -338,13 +364,14 @@ export class Game {
     } else p.mineT = 0;
 
     // ...and the axes hurt any creature that gets close
+    if (stunned) return;
     for (const b of this.enemies) {
-      if (b.state === 'dead' || b.state === 'spawn') continue;
+      if (!fighting(b)) continue;
       if (dist(b.x, b.z, p.x, p.z) > PLAYER.axeReach + (b.boss ? 1.4 : 0.6)) continue;
       b.hitT += dt;
       const tick = b.hitT >= 0.22;
       if (tick) b.hitT = 0;
-      this.damageEnemy(b, STATS.axeDps(this.lv) * this.world.towerMult * dt, tick);
+      this.damageEnemy(b, STATS.axeDps(this.lv) * this.world.towerMult * dt, tick, 'axe');
     }
   }
 
@@ -571,13 +598,21 @@ export class Game {
   private updateWaves(dt: number): void {
     if (!this.waveActive) {
       this.wallHp = Math.min(this.wallMax, this.wallHp + 10 * dt);
+      if (this.bossWaiting || this.wavesPaused) return;
       this.waveTimer -= dt;
       if (this.waveTimer <= 0) this.startWave();
       return;
     }
-    if (this.enemies.every((b) => b.state === 'dead')) {
+    const boss = this.enemies.find((e) => e.boss);
+    if (boss && fighting(boss)) {
+      this.bossTimer += dt;
+      if (this.bossTimer >= BOSS.timeLimit) this.bossRetreat();
+    }
+    if (this.enemies.every((b) => b.state === 'dead' || (b.state === 'flee' && b.loot === 0))) {
+      const won = !boss || boss.state === 'dead';
       this.waveActive = false;
       this.breached = false;
+      if (!won) return; // the boss got away: same wave again when the player is ready
       this.profile.stats.bestWave = Math.max(this.profile.stats.bestWave, this.wave);
       questProgress(this.profile, 'waves', 1);
       this.events.push({ type: 'waveCleared' });
@@ -589,42 +624,87 @@ export class Game {
     }
   }
 
-  private spawnEnemy(boss: boolean, delay: number): void {
-    const kind = this.world.def.enemy, e = ENEMIES[kind];
-    const hp = e.hp * WAVES.hp(this.wave) * this.world.hpMult * (boss ? WAVES.bossHp : 1);
-    const z = boss ? 0 : -10 + this.rnd() * 20;
+  /** Starts the waiting boss wave; the HUD button calls this. */
+  summonBoss(): boolean {
+    if (!this.bossWaiting) return false;
+    this.startWave();
+    return true;
+  }
+
+  private bossRetreat(): void {
+    for (const b of this.enemies) if (b.state !== 'dead') { b.state = 'flee'; b.slamWarnT = 0; b.stunT = 0; }
+    this.events.push({ type: 'toast', text: T.bossFled, sub: T.bossFledSub });
+    sfx('hurt');
+    this.onChange?.();
+  }
+
+  private spawnEnemy(variant: Variant, boss: boolean, delay: number, at?: Pt): void {
+    const kind = this.world.def.enemy, e = ENEMIES[kind], v = VARIANTS[variant];
+    const hp = e.hp * WAVES.hp(this.wave) * this.world.hpMult * v.hp * (boss ? BOSS.hp : 1);
+    const z = at ? at.z : boss ? 0 : -10 + this.rnd() * 20;
+    const shield = boss ? hp * BOSS.shield : 0;
     this.enemies.push({
-      id: this.nextId++, kind, boss, x: 27 + this.rnd() * 4, z, hp, maxHp: hp, homeZ: Math.max(-7.3, Math.min(7.3, z)),
-      speed: e.speed * (boss ? 0.75 : 1), damage: e.wallDamage * (boss ? WAVES.bossDamage : 1), attackEvery: e.attackEvery,
+      id: this.nextId++, kind, variant, boss, x: at ? at.x : 27 + this.rnd() * 4, z, hp, maxHp: hp, homeZ: Math.max(-7.3, Math.min(7.3, z)),
+      speed: e.speed * v.speed * (boss ? BOSS.speed : 1), damage: e.wallDamage * v.damage * (boss ? BOSS.damage : 1),
+      attackEvery: e.attackEvery,
       state: 'spawn', delay, atkT: 0, flash: 0, hitT: 0, deadT: 0, face: -Math.PI / 2, walkT: 0, slowT: 0, burnT: 0, burnDps: 0,
+      loot: 0, shield, maxShield: shield, stunT: 0, slamT: BOSS.slamEvery, slamWarnT: 0, summons: 0, enraged: false,
     });
   }
 
   private startWave(): void {
     this.waveActive = true;
     this.repairAdUsed = false;
-    const n = WAVES.count(this.wave);
-    for (let i = 0; i < n; i++) this.spawnEnemy(false, i * 1.3);
     const bossWave = this.wave % WAVES.bossEvery === 0;
-    if (bossWave) this.spawnEnemy(true, n * 1.3 + 1);
+    const n = Math.round(WAVES.count(this.wave) * (bossWave ? BOSS.escort : 1)), mix = WAVES.mix(this.wave);
+    for (let i = 0; i < n; i++) {
+      const r = this.rnd();
+      this.spawnEnemy(r < mix.tank ? 'tank' : r < mix.tank + mix.fast ? 'fast' : 'normal', false, i * 1.3);
+    }
+    if (bossWave) { this.spawnEnemy('normal', true, n * 1.3 + 1); this.bossTimer = 0; }
     this.events.push({ type: 'toast', text: fmt(T.wave, { n: this.wave }), sub: bossWave ? T.bossComing : T.waveStart });
     sfx('bear');
   }
 
-  private damageEnemy(b: Enemy, dmg: number, fx: boolean): void {
-    if (b.state === 'dead') return;
+  private damageEnemy(b: Enemy, dmg: number, fx: boolean, source: 'axe' | 'tower'): void {
+    if (!fighting(b)) return;
+    if (b.boss) {
+      if (b.shield > 0) {
+        if (source === 'tower') dmg *= BOSS.shieldedTowerMult;
+        else {
+          // the axes chip the shield away first
+          b.shield -= dmg * BOSS.shieldAxeMult;
+          if (fx) this.events.push({ type: 'burst', x: b.x, y: 2.2, z: b.z, color: 0x8fe8ff, n: 4 });
+          if (b.shield <= 0) {
+            b.shield = 0;
+            b.stunT = BOSS.stun;
+            b.slamWarnT = 0;
+            this.events.push({ type: 'toast', text: T.shieldBroken, sub: T.shieldBrokenSub });
+            this.events.push({ type: 'burst', x: b.x, y: 2.2, z: b.z, color: 0x8fe8ff, n: 30 });
+            this.events.push({ type: 'shake', power: 0.3 });
+            sfx('upgrade');
+            vibrate(80);
+          }
+          return;
+        }
+      } else if (b.stunT > 0 && source === 'tower') dmg *= BOSS.stunnedTowerMult;
+    }
     b.hp -= dmg;
     if (fx) {
       b.flash = 1;
       this.events.push({ type: 'burst', x: b.x, y: 1.1, z: b.z, color: 0xb3262e, n: 4 });
       sfx('hit');
     }
-    if (b.hp > 0) return;
+    if (b.hp > 0) {
+      if (b.boss) this.bossPhases(b);
+      return;
+    }
     b.state = 'dead';
     b.deadT = 0;
     this.profile.stats.kills++;
     questProgress(this.profile, 'kill', 1);
-    const value = Math.round(WAVES.reward(this.wave) * this.world.priceMult * (b.boss ? 20 : 1) * (this.boostActive('cash') ? 2 : 1));
+    const value = Math.round(WAVES.reward(this.wave) * this.world.priceMult * VARIANTS[b.variant].reward * (b.boss ? 20 : 1)
+      * (this.boostActive('cash') ? 2 : 1)) + b.loot;
     this.drops.push({ id: this.nextId++, x: b.x, z: b.z, value, t: 0 });
     this.events.push({ type: 'burst', x: b.x, y: 1, z: b.z, color: 0xffffff, n: b.boss ? 40 : 14 });
     sfx('bear');
@@ -635,18 +715,103 @@ export class Game {
       if (!this.bossDefeated) {
         this.bossDefeated = true;
         this.events.push({ type: 'toast', text: T.bossDown, sub: T.portalOpen });
-      }
+      } else this.events.push({ type: 'toast', text: T.bossDown });
       this.events.push({ type: 'shake', power: 0.6 });
       this.onChange?.();
     }
   }
 
+  /** Below set health the boss calls for help, and near the end it goes berserk. */
+  private bossPhases(b: Enemy): void {
+    const f = b.hp / b.maxHp;
+    if (b.summons < BOSS.summonAt.length && f <= BOSS.summonAt[b.summons]) {
+      b.summons++;
+      for (let i = 0; i < BOSS.summonCount; i++) {
+        this.spawnEnemy('fast', false, i * 0.25, { x: b.x + 2 + this.rnd() * 2, z: b.z + (i - 1) * 2.2 });
+      }
+      this.events.push({ type: 'toast', text: T.bossSummons });
+      this.events.push({ type: 'burst', x: b.x, y: 1.5, z: b.z, color: 0x7a3cff, n: 24 });
+      sfx('bear');
+    }
+    if (!b.enraged && f <= BOSS.enrageAt) {
+      b.enraged = true;
+      b.speed *= 1.3;
+      b.attackEvery *= 0.6;
+      this.events.push({ type: 'toast', text: T.bossRage });
+      this.events.push({ type: 'shake', power: 0.4 });
+    }
+  }
+
+  /** Boss ground slam: telegraphed by a ring, then stuns anyone inside it. */
+  private updateBossSkills(b: Enemy, dt: number): boolean {
+    const p = this.player;
+    if (b.stunT > 0) {
+      b.stunT -= dt;
+      if (b.stunT <= 0) {
+        b.shield = b.maxShield;
+        this.events.push({ type: 'toast', text: T.shieldBack });
+        this.events.push({ type: 'burst', x: b.x, y: 2.2, z: b.z, color: 0x8fe8ff, n: 20 });
+      }
+      return true;
+    }
+    if (b.slamWarnT > 0) {
+      b.slamWarnT -= dt;
+      if (b.slamWarnT <= 0) {
+        this.events.push({ type: 'slam', x: b.x, z: b.z, r: BOSS.slamRadius });
+        this.events.push({ type: 'burst', x: b.x, y: 0.3, z: b.z, color: 0xc9a27a, n: 30 });
+        this.events.push({ type: 'shake', power: 0.5 });
+        sfx('thud');
+        if (dist(b.x, b.z, p.x, p.z) < BOSS.slamRadius) {
+          p.stunT = BOSS.slamStun;
+          this.hurtPlayer(b, true);
+        }
+      }
+      return true;
+    }
+    b.slamT -= dt;
+    if (b.slamT <= 0 && dist(b.x, b.z, p.x, p.z) < BOSS.slamRadius + 1.5) {
+      b.slamT = BOSS.slamEvery * (b.enraged ? 0.7 : 1);
+      b.slamWarnT = BOSS.slamWarn;
+    }
+    return false;
+  }
+
+  /** A creature that reaches the cash grabs a share and runs for it. */
+  private stealCash(b: Enemy): void {
+    const total = this.money + this.cashPile;
+    let take = Math.min(total, Math.ceil(total * WAVES.steal));
+    b.state = 'flee';
+    if (take <= 0) return;
+    b.loot += take;
+    const fromPile = Math.min(this.cashPile, take);
+    this.cashPile -= fromPile;
+    take -= fromPile;
+    this.money -= take;
+    this.events.push({ type: 'float', text: `-$${formatNum(fromPile + take)}`, x: b.x, z: b.z, color: '#ff6b5f' });
+    this.events.push({ type: 'fly', kind: 'cash', x0: CASH_ZONE.x, y0: 0.6, z0: CASH_ZONE.z, x1: b.x, y1: 1.4, z1: b.z });
+    sfx('hurt');
+    this.onChange?.();
+  }
+
   private updateEnemies(dt: number): void {
     const p = this.player;
     const region = regionOf(p.x, p.z);
+    const loot = { x: CASH_ZONE.x + 1.4, z: CASH_ZONE.z - 1.4 };
     for (const b of this.enemies) {
       if (b.state === 'dead') { b.deadT += dt; continue; }
       if (b.state === 'spawn') { b.delay -= dt; if (b.delay <= 0) b.state = 'approach'; continue; }
+      if (b.state === 'flee') {
+        b.flash = Math.max(0, b.flash - dt * 9);
+        const wp = this.waypoint(b.x, b.z, 40, b.z);
+        this.walkTo(b, wp.x, wp.z, b.speed * (b.loot ? 1 : 1.4), dt, 0.1);
+        if (b.x > 33) {
+          if (b.loot) this.events.push({ type: 'toast', text: fmt(T.lootLost, { n: formatNum(b.loot) }) });
+          b.loot = 0;
+          b.state = 'dead';
+          b.deadT = 9;
+        }
+        continue;
+      }
       b.flash = Math.max(0, b.flash - dt * 9);
       b.slowT = Math.max(0, b.slowT - dt);
       if (b.burnT > 0) {
@@ -654,13 +819,15 @@ export class Game {
         b.hitT += dt;
         const tick = b.hitT >= 0.35;
         if (tick) { b.hitT = 0; this.events.push({ type: 'burst', x: b.x, y: 1.2, z: b.z, color: 0xff7a1a, n: 3 }); }
-        this.damageEnemy(b, b.burnDps * dt, false);
+        this.damageEnemy(b, b.burnDps * dt, false, 'tower');
         if ((b.state as Enemy['state']) === 'dead') continue;
       }
+      if (b.boss && this.updateBossSkills(b, dt)) continue;
       const spd = b.speed * (b.slowT > 0 ? 0.5 : 1);
       const dP = dist(b.x, b.z, p.x, p.z);
-      // creatures never enter the fenced forest or mine
-      const canChase = (this.breached && (region === 'camp' || region === 'out')) || (region === 'out' && dP < WAVES.aggro);
+      // creatures never enter the fenced forest or mine; bosses stay on the palisade
+      const raid = this.breached && !b.boss; // bosses keep smashing the palisade, the rest go for the money
+      const canChase = !b.boss && dP < WAVES.aggro && (region === 'out' || (this.breached && region === 'camp'));
       if (canChase) b.state = 'chase';
       else if (b.state === 'chase') b.state = 'approach';
       const reach = b.boss ? 2.4 : 1.5;
@@ -675,18 +842,25 @@ export class Game {
           this.walkTo(b, wp.x, wp.z, spd * 1.15, dt, 0.1);
         }
       } else if (b.state === 'approach') {
-        if (this.breached) {
-          const wp = this.waypoint(b.x, b.z, 2, 0);
-          this.walkTo(b, wp.x, wp.z, spd, dt, 0.8);
+        if (raid) {
+          // through the broken palisade and straight for the money
+          const wp = this.waypoint(b.x, b.z, loot.x, loot.z);
+          this.walkTo(b, wp.x, wp.z, spd, dt, 0.3);
+          if (dist(b.x, b.z, loot.x, loot.z) < 1.8) { b.state = 'attack'; b.atkT = 0; }
         } else if (this.walkTo(b, CAMP.half + (b.boss ? 2 : 1.2), b.homeZ, spd, dt, 0.15)) {
           b.state = 'attack';
           b.atkT = 0;
         }
       } else if (b.state === 'attack') {
-        b.face = turnTo(b.face, -Math.PI / 2, dt * 8);
         b.atkT += dt;
-        if (this.breached) b.state = 'approach';
-        else if (b.atkT >= b.attackEvery) {
+        if (raid) {
+          if (regionOf(b.x, b.z) !== 'camp' || dist(b.x, b.z, loot.x, loot.z) > 2.6) { b.state = 'approach'; continue; }
+          b.face = turnTo(b.face, Math.atan2(CASH_ZONE.x - b.x, CASH_ZONE.z - b.z), dt * 8);
+          if (b.atkT >= b.attackEvery) { b.atkT = 0; this.stealCash(b); }
+          continue;
+        }
+        b.face = turnTo(b.face, -Math.PI / 2, dt * 8);
+        if (b.atkT >= b.attackEvery) {
           b.atkT = 0;
           this.wallHp = Math.max(0, this.wallHp - b.damage);
           this.events.push({ type: 'burst', x: CAMP.half + 0.3, y: 1, z: b.z, color: 0xc9844a, n: b.boss ? 12 : 5 });
@@ -694,32 +868,34 @@ export class Game {
           sfx('thud');
           if (this.wallHp <= 0 && !this.breached) {
             this.breached = true;
-            this.events.push({ type: 'toast', text: T.breach });
+            this.events.push({ type: 'toast', text: T.breach, sub: T.breachSub });
             this.events.push({ type: 'shake', power: 0.5 });
             vibrate(150);
           }
         }
       }
-      if (!this.breached) b.x = Math.max(b.x, CAMP.half + (b.boss ? 1.6 : 0.9)); // the palisade holds
+      if (!raid) b.x = Math.max(b.x, CAMP.half + (b.boss ? 1.6 : 0.9)); // the palisade holds
     }
     const alive = this.aliveEnemies();
     for (let i = 0; i < alive.length; i++) {
       for (let j = i + 1; j < alive.length; j++) {
         const a = alive[i], c = alive[j];
         const min = a.boss || c.boss ? 2.4 : 1.3;
-        const d = dist(a.x, a.z, c.x, c.z);
+        const dx = a.x - c.x, dz = a.z - c.z;
+        if (Math.abs(dx) > min || Math.abs(dz) > min) continue;
+        const d = Math.hypot(dx, dz);
         if (d > 0 && d < min) {
-          const push = (min - d) / 2, nx = (a.x - c.x) / d, nz = (a.z - c.z) / d;
+          const push = (min - d) / 2, nx = dx / d, nz = dz / d;
           a.x += nx * push; a.z += nz * push; c.x -= nx * push; c.z -= nz * push;
         }
       }
     }
-    this.enemies = this.enemies.filter((b) => b.state !== 'dead' || b.deadT < 1.6);
+    if (this.enemies.some((b) => b.state === 'dead' && b.deadT >= 1.6)) this.enemies = this.enemies.filter((b) => b.state !== 'dead' || b.deadT < 1.6);
   }
 
-  private hurtPlayer(b: Enemy): void {
+  private hurtPlayer(b: Enemy, force = false): void {
     const p = this.player;
-    if (p.hurtT > 0) return;
+    if (p.hurtT > 0 && !force) return;
     p.hurtT = 1.2;
     const d = Math.max(0.01, dist(p.x, p.z, b.x, b.z));
     p.kx = ((p.x - b.x) / d) * (b.boss ? 16 : 10);
@@ -740,7 +916,7 @@ export class Game {
       const spec = TOWER_KINDS[t.kind];
       let target: Enemy | null = null, bestD = Infinity;
       for (const b of this.enemies) {
-        if (b.state === 'dead' || b.state === 'spawn') continue;
+        if (!fighting(b)) continue;
         const d = dist(b.x, b.z, t.x, t.z);
         if (d > TOWER.range) continue;
         // ice and fire towers prefer creatures that aren't already slowed / burning
@@ -759,7 +935,7 @@ export class Game {
     this.updatePet(dt);
     for (const bolt of this.bolts) {
       const b = this.enemies.find((x) => x.id === bolt.target);
-      if (!b || b.state === 'dead') { bolt.target = -1; continue; }
+      if (!b || !fighting(b)) { bolt.target = -1; continue; }
       const ty = b.boss ? 2 : 1;
       const dx = b.x - bolt.x, dy = ty - bolt.y, dz = b.z - bolt.z, d = Math.hypot(dx, dy, dz);
       const step = (bolt.kind === 'cannon' ? 18 : 28) * dt;
@@ -785,15 +961,15 @@ export class Game {
       this.events.push({ type: 'burst', x: b.x, y: 0.8, z: b.z, color: 0xffb02e, n: 10 });
       this.events.push({ type: 'shake', power: 0.12 });
       for (const o of this.enemies) {
-        if (o.state === 'dead' || o.state === 'spawn') continue;
-        if (dist(o.x, o.z, b.x, b.z) <= spec.splash) this.damageEnemy(o, bolt.dmg * (o === b ? 1 : 0.6), true);
+        if (!fighting(o)) continue;
+        if (dist(o.x, o.z, b.x, b.z) <= spec.splash) this.damageEnemy(o, bolt.dmg * (o === b ? 1 : 0.6), true, 'tower');
       }
       sfx('thud');
       return;
     }
     if (spec.slow) { b.slowT = Math.max(b.slowT, spec.slow); this.events.push({ type: 'burst', x: b.x, y: 1.2, z: b.z, color: 0x9fe6ff, n: 6 }); }
     if (spec.burn) { b.burnT = spec.burn; b.burnDps = Math.max(b.burnDps, this.towerDamage * 0.6); }
-    this.damageEnemy(b, bolt.dmg, true);
+    this.damageEnemy(b, bolt.dmg, true, 'tower');
   }
 
   // ---------- pet ----------
@@ -823,7 +999,7 @@ export class Game {
     } else if (id === 'dragon') {
       let target: Enemy | null = null, best = 9;
       for (const b of this.enemies) {
-        if (b.state === 'dead' || b.state === 'spawn') continue;
+        if (!fighting(b)) continue;
         const dd = dist(b.x, b.z, pet.x, pet.z);
         if (dd < best) { best = dd; target = b; }
       }
@@ -960,7 +1136,7 @@ export class Game {
     const l = this.lv[id];
     if (l >= def.max) return null;
     const p = def.cost(l);
-    return { ...p, cash: Math.round((p.cash ?? 0) * this.world.priceMult) };
+    return { ...p, cash: nicePrice((p.cash ?? 0) * this.world.priceMult) };
   }
 
   buyUpgrade(id: UpgradeId): boolean {
@@ -1185,13 +1361,21 @@ export class Game {
   /** Next thing the player should do: hint text plus where the guide arrow points. */
   objective(): { text: string; x: number; z: number } | null {
     const p = this.player;
+    const slam = this.enemies.find((b) => b.boss && b.slamWarnT > 0);
+    if (slam) {
+      const d = dist(slam.x, slam.z, p.x, p.z);
+      if (d < BOSS.slamRadius + 0.3) {
+        const k = (BOSS.slamRadius + 2) / Math.max(0.01, d);
+        return { text: T.dodge, x: slam.x + (p.x - slam.x) * k, z: slam.z + (p.z - slam.z) * k };
+      }
+    }
     const alive = this.aliveEnemies();
     if (alive.length && (this.breached || this.towers.length === 0)) {
       const b = this.nearest(alive)!;
-      return { text: this.breached ? T.breach : T.defend, x: b.x, z: b.z };
+      return { text: this.breached ? T.stealing : T.defend, x: b.x, z: b.z };
     }
     const boss = this.boss();
-    if (boss) return { text: T.bossFight, x: boss.x, z: boss.z };
+    if (boss) return { text: boss.shield > 0 ? T.breakShield : T.bossStunned, x: boss.x, z: boss.z };
 
     const next = PAD_ORDER.map((id) => this.pad(id)).find((pd) => this.padVisible(pd) && pd.level === 0);
     if (next) {
@@ -1203,6 +1387,7 @@ export class Game {
     if (this.cashPile > 0 && !p.stack.length) return this.hintCash();
     if (p.stack.length >= this.capacity) return this.hintDeliver();
     if (!p.stack.length && this.affordableUpgrade()) return { text: T.forge, x: FORGE_ZONE.x, z: FORGE_ZONE.z };
+    if (this.bossWaiting) return { text: T.summonHint, x: GATES.out.camp.x, z: GATES.out.camp.z };
     if (!this.bossDefeated) return this.hintChop(fmt(T.survive, { n: Math.ceil(this.wave / WAVES.bossEvery) * WAVES.bossEvery }));
     return this.hintChop(T.free);
   }
@@ -1284,16 +1469,16 @@ export class Game {
     this.player.stack = Array.from({ length: Math.min(d.stack, this.capacity) }, () => ({ anim: 1, fx: 0, fy: 0, fz: 0 }));
     if (!this.blocked(d.px, d.pz, PLAYER.radius)) { this.player.x = d.px; this.player.z = d.pz; }
     this.wave = d.wave;
-    this.waveTimer = Math.max(15, d.waveTimer);
+    this.waveTimer = Math.max(45, d.waveTimer);
     this.wallHp = d.wallHp;
     this.bossDefeated = d.bossDefeated;
     this.worldDone = d.worldDone;
 
-    // lumberjacks keep supplying the camp while the game is closed (about half the online rate, max 2h)
-    const away = Math.min(2 * 3600, (Date.now() - d.savedAt) / 1000);
+    // lumberjacks keep supplying the camp while the game is closed (a slice of the online rate, max 4h)
+    const away = Math.min(OFFLINE_MAX, (Date.now() - d.savedAt) / 1000);
     const lumber = this.level('lumber');
     if (away > 60 && lumber > 0) {
-      const earned = Math.floor(away * lumber * 0.25 * this.world.priceMult);
+      const earned = Math.floor(away * lumber * 0.2 * this.world.priceMult);
       this.pendingOffline = earned;
       this.events.push({ type: 'offline', amount: earned });
     }

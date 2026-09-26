@@ -7,7 +7,7 @@ import {
   BOOSTS, CHEST, GEMS, SKINS, STATS, UPGRADES, WORLDS, type Gem, type Levels, type Price, type Reward, type UpgradeId,
 } from '../data';
 import { DAILY_REWARDS, type Quality, type Settings } from '../profile';
-import { PETS, type PetId } from '../data';
+import { BOSS, PETS, type PetId } from '../data';
 import { PRODUCTS, type ProductId } from '../platform/config';
 import { T, fmt } from '../i18n';
 import { unlockAudio } from '../audio';
@@ -48,6 +48,11 @@ const CSS = `
 #hud .boss { display: none; flex-direction: column; align-items: center; gap: 3px; margin-top: 4px; color: #ffd23f; font-size: 14px; }
 #hud .boss .bar { width: 220px; height: 14px; }
 #hud .boss .bar i { background: linear-gradient(#ff6a5a, #b3262e); }
+#hud .boss .bar.shield { height: 8px; }
+#hud .boss .bar.shield i { background: linear-gradient(#bff4ff, #3bb8e8); }
+#hud .boss small { font-size: 12px; color: #fff; }
+#hud .summon { position: absolute; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 110px); transform: translateX(-50%);
+  pointer-events: auto; display: none; font-size: 18px; padding: 12px 22px; animation: pulse 1.4s ease-in-out infinite; }
 #hud .boosts { display: flex; gap: 5px; flex-wrap: wrap; max-width: 200px; }
 #hud .boosts span { font-size: 12px; background: rgba(255,170,40,.85); color: #2a1a00; border-radius: 999px; padding: 2px 8px; }
 #hud .toast { position: absolute; left: 0; right: 0; top: 34%; text-align: center; opacity: 0; transition: opacity .25s;
@@ -120,7 +125,7 @@ const CSS = `
 #hud .fps { position: absolute; left: 12px; bottom: calc(env(safe-area-inset-bottom) + 8px); font-size: 12px; background: rgba(20,32,52,.6); padding: 2px 8px; border-radius: 8px; display: none; }
 #hud .setrow { display: flex; align-items: center; justify-content: space-between; background: #26345a; border-radius: 14px; padding: 10px 12px; font-size: 15px; }
 #hud .setrow .btn { min-width: 96px; padding: 8px 12px; }
-#hud .danger { background: linear-gradient(#ff7a6b, #d93a2f); box-shadow: 0 3px 0 #9e2a20; }
+#hud .btn.danger { background: linear-gradient(#ff7a6b, #d93a2f); box-shadow: 0 3px 0 #9e2a20; }
 `;
 
 interface Floater { el: HTMLDivElement; pos: THREE.Vector3; t: number; }
@@ -167,6 +172,7 @@ export class Hud {
   private shopTab: ShopTab = 'gems';
   private panelKey = '';
   private forgeCooldown = 0;
+  private dots: Record<string, HTMLElement> = {};
 
   constructor() {
     const style = document.createElement('style');
@@ -196,12 +202,14 @@ export class Hud {
         <button class="round" data-act="settings">⚙️</button>
       </div>
       <button class="btn ad repair" data-act="adRepair" data-v="repair"></button>
+      <button class="btn danger summon" data-act="summonBoss" data-v="summon"></button>
       <div class="hand" data-v="hand">👆</div>
       <div class="tut" data-v="tut"></div>
       <div class="fps" data-v="fps"></div>
       <div class="hint" data-v="hint"></div>
       <div class="wave" data-v="waveBox"><span data-v="wave"></span><div class="bar"><i data-v="wall"></i></div>
-        <div class="boss" data-v="bossBox"><span>👑 BOSS</span><div class="bar"><i data-v="bossHp"></i></div></div></div>
+        <div class="boss" data-v="bossBox"><span>👑 BOSS</span><div class="bar"><i data-v="bossHp"></i></div>
+          <div class="bar shield" data-v="shieldBar"><i data-v="bossShield"></i></div><small data-v="bossTime"></small></div></div>
       <div class="toast"><div class="t1"></div><div class="t2"></div></div>
       <div class="joy"><i></i></div>
       <div class="overlay" data-v="overlay"><div class="panel" data-v="panel"></div></div>`;
@@ -348,6 +356,7 @@ export class Hud {
       case 'adChest': void this.withAd(() => this.showToast(T.got, priceText(g.adChest()))); return;
       case 'adDouble': void this.withAd(() => this.showToast(T.got, rewardText(g.doubleDaily()))); return;
       case 'adRepair': void this.withAd(() => g.adRepair()); return;
+      case 'summonBoss': g.summonBoss(); return;
       case 'offline':
         if (arg === 'ad') void this.withAd(() => { g.claimOffline(2); this.close(); });
         else { g.claimOffline(1); this.close(); }
@@ -550,12 +559,21 @@ export class Hud {
     set('world', `${fmt(T.worldN, { n: w.n + 1 })}: ${T.world[w.def.id]}${w.cycle ? ` · ${fmt(T.cycle, { n: w.cycle + 1 })}` : ''}`);
 
     const enemies = g.enemies.filter((e) => e.state !== 'dead').length;
-    set('wave', g.waveActive ? `${fmt(T.wave, { n: g.wave })} · ${enemies} 👾` : fmt(T.waveIn, { n: g.wave, t: fmtTime(g.waveTimer) }));
+    set('wave', g.waveActive ? `${fmt(T.wave, { n: g.wave })} · ${enemies} 👾`
+      : g.bossWaiting ? `👑 ${fmt(T.wave, { n: g.wave })}: BOSS`
+        : g.wavesPaused ? `⏸ ${T.wavesPaused}` : fmt(T.waveIn, { n: g.wave, t: fmtTime(g.waveTimer) }));
     this.els.wall.style.width = `${(g.wallHp / g.wallMax) * 100}%`;
     this.els.waveBox.classList.toggle('danger', g.waveActive);
     const boss = g.boss();
     this.els.bossBox.style.display = boss ? 'flex' : 'none';
-    if (boss) this.els.bossHp.style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
+    if (boss) {
+      this.els.bossHp.style.width = `${Math.max(0, boss.hp / boss.maxHp) * 100}%`;
+      this.els.shieldBar.style.display = boss.maxShield ? 'block' : 'none';
+      this.els.bossShield.style.width = `${boss.stunT > 0 ? 0 : (boss.shield / boss.maxShield) * 100}%`;
+      set('bossTime', fmt(T.bossTime, { t: fmtTime(Math.max(0, BOSS.timeLimit - g.bossTimer)) }));
+    }
+    this.els.summon.style.display = g.bossWaiting && !this.panel ? 'block' : 'none';
+    if (g.bossWaiting) set('summon', `⚔️ ${T.summonBoss}`);
 
     const boosts = (['cash', 'speed', 'chop'] as const).filter((b) => g.boostActive(b))
       .map((b) => `${BOOSTS.find((x) => x.id === b)!.icon} ${fmtTime(g.boostLeft(b))}`).join('|');
@@ -564,7 +582,10 @@ export class Hud {
       this.els.boosts.innerHTML = boosts ? boosts.split('|').map((s) => `<span>${s}</span>`).join('') : '';
     }
 
-    const dot = (act: string, on: boolean) => this.root.querySelector(`[data-act="${act}"]`)!.classList.toggle('dot', on);
+    const dot = (act: string, on: boolean) => {
+      const el = (this.dots[act] ??= this.root.querySelector<HTMLElement>(`.side [data-act="${act}"]`)!);
+      if (el.classList.contains('dot') !== on) el.classList.toggle('dot', on);
+    };
     dot('daily', g.dailyAvailable());
     dot('quests', g.questsReady() > 0);
     dot('forge', !!g.affordableUpgrade());

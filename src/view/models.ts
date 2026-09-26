@@ -2,7 +2,7 @@
 // Static parts of a model are merged into one vertex-coloured mesh to keep draw calls low.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { EnemyKind, PadIcon, PetId, SurvivorKind, TowerKind } from '../data';
+import type { EnemyKind, PadIcon, PetId, SurvivorKind, TowerKind, Variant } from '../data';
 
 export const COLORS = {
   bark: 0x9c5f2e,
@@ -16,7 +16,12 @@ export const COLORS = {
   cash: 0x39c24c,
   cashLight: 0x9df2a6,
   gold: 0xffd23f,
+  iron: 0x4a4f58,
+  stone: 0x9a9fa6,
 };
+
+const shade = (c: number, k: number) => new THREE.Color(c).multiplyScalar(k).getHex();
+const blend = (a: number, b: number, t: number) => new THREE.Color(a).lerp(new THREE.Color(b), t).getHex();
 
 const matCache = new Map<string, THREE.MeshLambertMaterial>();
 export function mat(color: number, opts: { flat?: boolean; vertex?: boolean } = {}): THREE.MeshLambertMaterial {
@@ -73,7 +78,8 @@ export function shadowed<T extends THREE.Object3D>(o: T): T {
 }
 
 // short-hand primitives
-const S = (r: number, w = 10, h = 8) => new THREE.SphereGeometry(r, w, h);
+/** Spheres get fewer segments the smaller they are: tiny eyes and flowers do not need 160 triangles. */
+const S = (r: number, w = r < 0.2 ? 6 : r < 0.5 ? 8 : 10, h = r < 0.2 ? 4 : r < 0.5 ? 6 : 8) => new THREE.SphereGeometry(r, w, h);
 const C = (rt: number, rb: number, h: number, seg = 8) => new THREE.CylinderGeometry(rt, rb, h, seg);
 const K = (r: number, h: number, seg = 8) => new THREE.ConeGeometry(r, h, seg);
 const B = (w: number, h: number, d: number) => new THREE.BoxGeometry(w, h, d);
@@ -264,7 +270,52 @@ function makeCrown(): THREE.Group {
   return g;
 }
 
-export function makeEnemy(kind: EnemyKind): EnemyRig {
+/** Iron helmet for armoured brutes, red headband for fast runners. */
+function variantGear(variant: Variant): THREE.Mesh | null {
+  if (variant === 'tank') {
+    return mesh([
+      P(S(0.36, 10, 6), COLORS.iron, [0, 0, 0], undefined, [1, 0.62, 1.05]),
+      P(C(0.4, 0.4, 0.07, 12), 0x6b717b, [0, -0.06, 0]),
+      P(K(0.07, 0.3, 6), 0xe6e0d0, [0.3, 0.12, 0], [0, 0, -0.9]),
+      P(K(0.07, 0.3, 6), 0xe6e0d0, [-0.3, 0.12, 0], [0, 0, 0.9]),
+      P(B(0.08, 0.05, 0.3), 0x6b717b, [0, 0.2, 0.08]),
+    ]);
+  }
+  if (variant === 'fast') {
+    return mesh([
+      P(Tor(0.3, 0.05), 0xe8302a, [0, -0.05, 0], [Math.PI / 2, 0, 0]),
+      P(B(0.06, 0.04, 0.35), 0xe8302a, [0.05, -0.05, -0.42], [0.3, 0, 0]),
+      P(B(0.06, 0.04, 0.3), 0xc0231d, [-0.08, -0.1, -0.4], [0.5, 0, 0.2]),
+    ]);
+  }
+  return null;
+}
+
+const enemyTemplates = new Map<string, EnemyRig>();
+
+/**
+ * Creatures are built once per kind and variant, then cloned: clones share geometry (no per-spawn
+ * merging, nothing to leak) and only get their own material for hit flashes and tints.
+ */
+export function makeEnemy(kind: EnemyKind, variant: Variant = 'normal'): EnemyRig {
+  const key = `${kind}|${variant}`;
+  let t = enemyTemplates.get(key);
+  if (!t) { t = buildEnemy(kind, variant); enemyTemplates.set(key, t); }
+  const root = t.root.clone(true);
+  const src: THREE.Object3D[] = [], dst: THREE.Object3D[] = [];
+  t.root.traverse((o) => src.push(o));
+  root.traverse((o) => dst.push(o));
+  const map = new Map(src.map((o, i) => [o, dst[i]]));
+  const material = t.material.clone();
+  root.traverse((o) => { const m = o as THREE.Mesh; if (m.isMesh && m.material === t!.material) m.material = material; });
+  const get = <O extends THREE.Object3D>(o: O) => map.get(o) as O;
+  return {
+    ...t, root, material, body: get(t.body), head: t.head && get(t.head), jaw: t.jaw && get(t.jaw), crown: get(t.crown),
+    legs: t.legs.map(get), arms: t.arms.map(get), tail: t.tail.map(get),
+  };
+}
+
+function buildEnemy(kind: EnemyKind, variant: Variant): EnemyRig {
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   const root = new THREE.Group();
   const body = new THREE.Group();
@@ -530,6 +581,11 @@ export function makeEnemy(kind: EnemyKind): EnemyRig {
     rig.height = 1.8;
   }
   rig.crown.visible = false;
+  const gear = variantGear(variant);
+  if (gear) {
+    gear.position.copy(rig.crown.position);
+    rig.crown.parent?.add(gear);
+  }
   return { ...rig, root: shadowed(root) };
 }
 
@@ -610,24 +666,62 @@ export function gemGeometry(color: number): THREE.BufferGeometry {
   ]);
 }
 
-export function fenceLogGeometry(side: number, top: number): THREE.BufferGeometry {
+/**
+ * One palisade post. Tiers: 0 plain logs, 1 sharpened logs with iron bands,
+ * 2 stone footing with banded logs, 3 a stone wall block (the view alternates heights into battlements).
+ */
+export function fenceLogGeometry(side: number, top: number, tier = 0): THREE.BufferGeometry {
+  if (tier === 0) {
+    return merged([
+      P(new THREE.CylinderGeometry(0.33, 0.33, 1.25, 10, 1, true), side, [0, 0.62, 0]),
+      P(new THREE.CircleGeometry(0.33, 10), top, [0, 1.25, 0], [-Math.PI / 2, 0, 0]),
+      P(new THREE.RingGeometry(0.12, 0.16, 10), shade(top, 0.85), [0, 1.255, 0], [-Math.PI / 2, 0, 0]),
+    ]);
+  }
+  const band = (y: number, r = 0.345) => P(C(r, r, 0.09, 10), COLORS.iron, [0, y, 0]);
+  if (tier === 1) {
+    return merged([
+      P(new THREE.CylinderGeometry(0.33, 0.33, 1.3, 10, 1, true), shade(side, 0.92), [0, 0.65, 0]),
+      P(K(0.33, 0.45, 10), top, [0, 1.52, 0]),
+      band(0.3), band(1.05),
+    ]);
+  }
+  if (tier === 2) {
+    return merged([
+      P(B(0.66, 0.55, 0.8), COLORS.stone, [0, 0.27, 0]),
+      P(B(0.7, 0.08, 0.84), shade(COLORS.stone, 0.8), [0, 0.56, 0]),
+      P(new THREE.CylinderGeometry(0.3, 0.3, 1.0, 10, 1, true), shade(side, 0.9), [0, 1.1, 0]),
+      P(K(0.3, 0.45, 10), top, [0, 1.82, 0]),
+      band(0.9, 0.315), band(1.4, 0.315),
+    ]);
+  }
   return merged([
-    P(new THREE.CylinderGeometry(0.33, 0.33, 1.25, 10, 1, true), side, [0, 0.62, 0]),
-    P(new THREE.CircleGeometry(0.33, 10), top, [0, 1.25, 0], [-Math.PI / 2, 0, 0]),
-    P(new THREE.RingGeometry(0.12, 0.16, 10), new THREE.Color(top).multiplyScalar(0.85).getHex(), [0, 1.255, 0], [-Math.PI / 2, 0, 0]),
+    P(B(0.66, 1.55, 0.95), COLORS.stone, [0, 0.77, 0]),
+    P(B(0.68, 0.12, 0.99), shade(COLORS.stone, 0.78), [0, 0.3, 0]),
+    P(B(0.68, 0.12, 0.99), shade(COLORS.stone, 0.85), [0, 1.0, 0]),
+    P(B(0.7, 0.14, 1.02), blend(COLORS.stone, 0xffffff, 0.25), [0, 1.6, 0]),
   ]);
 }
 
 export interface GateRig { root: THREE.Group; left: THREE.Group; right: THREE.Group; }
-/** Double gate spanning `width`, laid out along local x. */
-export function makeGate(width: number, panel: number, wood: number, top: number): GateRig {
+/** Double gate spanning `width`, laid out along local x; it looks sturdier with each palisade tier. */
+export function makeGate(width: number, panel: number, wood: number, top: number, tier = 0): GateRig {
   const root = new THREE.Group();
-  const half = width / 2;
-  const leafGeo = merged([
-    P(B(half - 0.05, 1.05, 0.14), new THREE.Color(wood).multiplyScalar(0.7).getHex(), [(half - 0.05) / 2, 0.62, 0]),
-    P(B(half - 0.35, 0.75, 0.16), panel, [(half - 0.05) / 2, 0.62, 0]),
-    P(B(0.1, 1.15, 0.18), wood, [(half - 0.05) / 2, 0.62, 0], [0, 0, 0.9]),
-  ]);
+  const half = width / 2, lw = half - 0.05, cx = lw / 2;
+  const leafParts: Part[] = [
+    P(B(lw, 1.05 + tier * 0.12, 0.14), tier >= 3 ? 0x5b616b : shade(wood, 0.7), [cx, 0.62 + tier * 0.06, 0]),
+    P(B(half - 0.35, 0.75, 0.16), tier >= 3 ? blend(panel, 0x39414d, 0.4) : panel, [cx, 0.62 + tier * 0.06, 0]),
+    P(B(0.1, 1.15, 0.18), tier >= 3 ? COLORS.gold : wood, [cx, 0.62 + tier * 0.06, 0], [0, 0, 0.9]),
+  ];
+  if (tier >= 1) {
+    // iron straps and rivets
+    for (const y of [0.3, 0.95 + tier * 0.1]) {
+      leafParts.push(P(B(lw, 0.1, 0.2), tier >= 3 ? COLORS.gold : COLORS.iron, [cx, y, 0]));
+      for (let i = 0; i < 3; i++) leafParts.push(P(S(0.045, 6, 4), 0xd8dde3, [0.2 + i * (lw - 0.4) / 2, y, 0.11]));
+    }
+  }
+  if (tier >= 2) leafParts.push(P(Tor(0.12, 0.03), COLORS.gold, [lw - 0.25, 0.7, 0.12]));
+  const leafGeo = merged(leafParts);
   const left = new THREE.Group();
   left.position.x = -half;
   left.add(new THREE.Mesh(leafGeo, vertexMat()));
@@ -635,11 +729,30 @@ export function makeGate(width: number, panel: number, wood: number, top: number
   right.position.x = half;
   right.rotation.y = Math.PI;
   right.add(new THREE.Mesh(leafGeo, vertexMat()));
-  const postGeo = merged([
-    P(C(0.38, 0.38, 1.6, 10), wood, [0, 0.8, 0]),
-    P(new THREE.CircleGeometry(0.38, 10), top, [0, 1.601, 0], [-Math.PI / 2, 0, 0]),
-    P(K(0.2, 0.3, 6), panel, [0, 1.75, 0]),
-  ]);
+  let postGeo: THREE.BufferGeometry;
+  if (tier <= 1) {
+    postGeo = merged([
+      P(C(0.38, 0.38, 1.6, 10), wood, [0, 0.8, 0]),
+      P(new THREE.CircleGeometry(0.38, 10), top, [0, 1.601, 0], [-Math.PI / 2, 0, 0]),
+      P(K(0.2, 0.3, 6), panel, [0, 1.75, 0]),
+      ...(tier === 1 ? [P(C(0.395, 0.395, 0.1, 10), COLORS.iron, [0, 0.4, 0]), P(C(0.395, 0.395, 0.1, 10), COLORS.iron, [0, 1.3, 0]),
+        P(K(0.4, 0.5, 10), top, [0, 1.85, 0])] : []),
+    ]);
+  } else {
+    // stone gate towers; the top tier gets battlements and a banner
+    const h = tier === 2 ? 2.1 : 2.6;
+    const parts: Part[] = [
+      P(B(0.9, h, 0.9), COLORS.stone, [0, h / 2, 0]),
+      P(B(1.0, 0.16, 1.0), shade(COLORS.stone, 0.8), [0, 0.35, 0]),
+      P(B(1.02, 0.16, 1.02), blend(COLORS.stone, 0xffffff, 0.2), [0, h, 0]),
+    ];
+    if (tier === 2) parts.push(P(K(0.62, 0.7, 4), panel, [0, h + 0.42, 0], [0, Math.PI / 4, 0]));
+    else {
+      for (const [x, z] of [[-0.36, -0.36], [0.36, -0.36], [-0.36, 0.36], [0.36, 0.36]]) parts.push(P(B(0.26, 0.3, 0.26), COLORS.stone, [x, h + 0.22, z]));
+      parts.push(P(C(0.03, 0.03, 1.1, 5), COLORS.iron, [0, h + 0.6, 0]), P(B(0.02, 0.4, 0.6), panel, [0, h + 0.9, 0.3]));
+    }
+    postGeo = merged(parts);
+  }
   for (const x of [-half - 0.2, half + 0.2]) {
     const p = new THREE.Mesh(postGeo, vertexMat());
     p.position.x = x;
@@ -650,24 +763,70 @@ export function makeGate(width: number, panel: number, wood: number, top: number
 }
 
 export interface TowerRig { root: THREE.Group; head: THREE.Group; stock: THREE.Object3D; flag: THREE.Mesh; kind: TowerKind; }
-export function makeTower(wood: number, accent: number, kind: TowerKind = 'crossbow'): TowerRig {
+/**
+ * Tier 0 wooden, 1 iron-banded, 2 stone with battlements, 3 tall stone with gold trim, 4 royal with a glowing crystal.
+ * Each tier replaces the whole model rather than bolting parts on.
+ */
+export function makeTower(wood: number, accent: number, kind: TowerKind = 'crossbow', tier = 0): TowerRig {
   const root = new THREE.Group();
-  const dark = new THREE.Color(wood).multiplyScalar(0.7).getHex();
-  const stone = kind === 'ice' ? 0xbfe6f5 : kind === 'fire' ? 0x7a3a2a : kind === 'cannon' ? 0x6d737c : 0x8d939b;
-  const body = kind === 'crossbow' ? wood : kind === 'ice' ? 0xdff4ff : kind === 'fire' ? 0x9a4a32 : 0x8a9099;
-  root.add(mesh([
-    P(C(0.95, 1.05, 0.35, 8), stone, [0, 0.17, 0]),
-    P(C(0.72, 0.86, 1.9, 8), body, [0, 1.1, 0]),
-    P(C(0.74, 0.74, 0.08, 8), kind === 'crossbow' ? dark : stone, [0, 0.7, 0]),
-    P(C(0.74, 0.74, 0.08, 8), kind === 'crossbow' ? dark : stone, [0, 1.5, 0]),
-    P(C(1.02, 0.95, 0.24, 8), kind === 'crossbow' ? COLORS.logEnd : stone, [0, 2.15, 0]),
-    P(C(0.04, 0.04, 1.4, 5), dark, [0.8, 2.8, 0]),
-  ]));
-  const flag = mesh([P(B(0.02, 0.35, 0.5), accent, [0, 0, -0.25])]);
-  flag.position.set(0.8, 3.3, 0);
+  const dark = shade(wood, 0.7);
+  const kindStone = kind === 'ice' ? 0xbfe6f5 : kind === 'fire' ? 0x7a3a2a : kind === 'cannon' ? 0x6d737c : 0x8d939b;
+  const kindBody = kind === 'crossbow' ? wood : kind === 'ice' ? 0xdff4ff : kind === 'fire' ? 0x9a4a32 : 0x8a9099;
+  const h = 1 + tier * 0.1; // taller with every tier
+  const stone = tier >= 2 ? blend(kindStone, COLORS.stone, kind === 'crossbow' ? 0.6 : 0.2) : kindStone;
+  const body = tier >= 2 ? blend(kindBody, COLORS.stone, kind === 'crossbow' ? 0.75 : 0.25) : kindBody;
+  const band = tier === 0 ? (kind === 'crossbow' ? dark : kindStone) : tier >= 3 ? COLORS.gold : COLORS.iron;
+  const topY = 2.15 * h;
+  const r = 0.72 + tier * 0.03;
+  const parts: Part[] = [
+    P(C(0.95 + tier * 0.06, 1.05 + tier * 0.08, 0.35 + tier * 0.1, 8), stone, [0, 0.17 + tier * 0.05, 0]),
+    P(C(r, r + 0.14, 1.9 * h, 8), body, [0, 1.1 * h, 0]),
+    P(C(r + 0.02, r + 0.02, 0.08 + (tier ? 0.04 : 0), 8), band, [0, 0.7 * h, 0]),
+    P(C(r + 0.02, r + 0.02, 0.08 + (tier ? 0.04 : 0), 8), band, [0, 1.5 * h, 0]),
+    P(C(1.02 + tier * 0.04, 0.95, 0.24, 8), kind === 'crossbow' && tier < 2 ? COLORS.logEnd : stone, [0, topY, 0]),
+    P(C(0.04, 0.04, 1.4, 5), tier >= 3 ? COLORS.gold : dark, [0.8, topY + 0.65, 0]),
+  ];
+  if (tier === 0 && kind === 'crossbow') {
+    // plank lines on the wooden body
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      parts.push(P(B(0.04, 1.8, 0.04), dark, [Math.cos(a) * (r + 0.06), 1.1, Math.sin(a) * (r + 0.06)]));
+    }
+  }
+  if (tier === 1) {
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2;
+      parts.push(P(S(0.06, 6, 4), 0xd8dde3, [Math.cos(a) * (r + 0.05), 1.5 * h, Math.sin(a) * (r + 0.05)]));
+      parts.push(P(K(0.06, 0.28, 5), COLORS.iron, [Math.cos(a) * 1.02, topY + 0.2, Math.sin(a) * 1.02]));
+    }
+  }
+  if (tier >= 2) {
+    // battlements around the top
+    const n = 8;
+    for (let i = 0; i < n; i++) {
+      const a = (i / n) * Math.PI * 2 + Math.PI / 8;
+      parts.push(P(B(0.3, 0.32, 0.22), stone, [Math.cos(a) * 0.95, topY + 0.27, Math.sin(a) * 0.95], [0, -a, 0]));
+    }
+    // brick lines
+    for (const y of [0.45, 0.95, 1.8]) parts.push(P(C(r + 0.1, r + 0.1, 0.05, 8), shade(body, 0.82), [0, y * h, 0]));
+    parts.push(P(B(0.28, 0.4, 0.1), 0x2a2f3a, [0, 1.25 * h, r + 0.1]));
+  }
+  if (tier >= 3) {
+    parts.push(P(Tor(1.04 + tier * 0.04, 0.05), COLORS.gold, [0, topY + 0.1, 0], [Math.PI / 2, 0, 0]));
+    parts.push(P(B(0.02, 0.8, 0.45), accent, [0, 1.3 * h, r + 0.12]));
+    parts.push(P(K(0.23, 0.2, 3), accent, [0, 0.8 * h, r + 0.12], [Math.PI, 0, 0]));
+  }
+  root.add(mesh(parts));
+  if (tier >= 4) {
+    const gem = new THREE.Mesh(merged([P(O(0.2), 0xffffff, [-0.8, topY + 0.95, 0], undefined, [1, 1.6, 1])]), glowMat(accent));
+    root.add(gem);
+  }
+  const flag = mesh([P(B(0.02, 0.35 + tier * 0.05, 0.5 + tier * 0.08), tier >= 3 ? COLORS.gold : accent, [0, 0, -0.25 - tier * 0.04])]);
+  flag.position.set(0.8, topY + 1.15, 0);
   root.add(flag);
   const head = new THREE.Group();
-  head.position.y = 2.5;
+  head.position.y = topY + 0.35;
+  head.scale.setScalar(1 + tier * 0.08);
   head.add(mesh([P(C(0.22, 0.3, 0.35, 8), dark, [0, -0.1, 0])]));
   let stock: THREE.Object3D;
   if (kind === 'ice') {
@@ -966,6 +1125,23 @@ export function makePadIcon(icon: PadIcon, accent: number): THREE.Group {
       m = makeTent(0xe8a23a);
       m.scale.setScalar(0.4);
       m.position.y = -0.4;
+      break;
+    }
+    case 'armory': {
+      const shield = mesh([
+        P(C(0.36, 0.36, 0.08, 14), 0x2f6fd1, [0, 0, 0], [Math.PI / 2, 0, 0]),
+        P(C(0.2, 0.2, 0.1, 14), COLORS.gold, [0, 0, 0.01], [Math.PI / 2, 0, 0]),
+        P(Tor(0.36, 0.035), COLORS.steel, [0, 0, 0]),
+      ]);
+      const sword = () => mesh([
+        P(B(0.08, 0.8, 0.03), COLORS.steel, [0, 0.2, 0]), P(B(0.28, 0.06, 0.06), COLORS.gold, [0, -0.2, 0]),
+        P(C(0.03, 0.03, 0.2, 5), COLORS.woodDark, [0, -0.32, 0]),
+      ]);
+      const a = sword(), b = sword();
+      a.rotation.z = 0.7; b.rotation.z = -0.7;
+      a.position.z = b.position.z = -0.08;
+      m = new THREE.Group();
+      m.add(a, b, shield);
       break;
     }
     case 'ice': case 'fire': case 'cannon': {

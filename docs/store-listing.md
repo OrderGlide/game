@@ -29,7 +29,10 @@ Wirujące topory kosią las w zagrodzie, a ty nosisz na plecach coraz wyższy st
 Wydobywaj szmaragdy, diamenty i rzadki obsydian. Za klejnoty ulepszysz w Kuźni plecak, siekierę, kilof, buty i moc wież. Te ulepszenia zostają z tobą na zawsze.
 
 🏹 OBRONA
-Co minutę nadciąga fala potworów. Postaw kusze, wieże lodowe spowalniające wrogów, ogniste wieże podpalające przeciwników i armaty z obrażeniami obszarowymi. Co 10. fala przychodzi boss w koronie. Pokonaj go, zbuduj portal i ruszaj dalej.
+Co minutę nadciąga fala potworów: szybcy biegacze, opancerzone bestie i złodzieje, którzy rzucają się na twoje pieniądze. Postaw kusze, wieże lodowe, ogniste i armaty, a w Zbrojowni zamień drewniane wieże w kamienne twierdze.
+
+👑 BOSSOWIE
+Co 10. fala czeka boss w koronie. Wezwij go, gdy będziesz gotowy. Rozbij toporami jego tarczę, uciekaj z kręgu przed uderzeniem i pokonaj go, zanim się wycofa. Potem zbuduj portal i ruszaj dalej.
 
 🌍 6 ŚWIATÓW
 Mroźna Tajga z niedźwiedziami polarnymi, Złote Wydmy ze skorpionami, Dzika Dżungla z gorylami, Mroczne Bagna z krokodylami, Popielny Szczyt z golemami lawy i Kryształowa Kraina z kryształowymi pająkami. Każdy świat ma własną muzykę, drzewa i ocalałych. Po szóstym świecie zaczynasz od nowa na wyższym poziomie trudności, bez końca.
@@ -69,7 +72,10 @@ Spinning axes mow down the fenced forest while you carry an ever-growing stack o
 Mine emeralds, diamonds and rare obsidian. Use gems at the Forge to upgrade your backpack, axe, pickaxe, boots and tower power. Forge upgrades are yours forever.
 
 🏹 DEFENSE
-A monster wave arrives every minute. Build crossbows, ice towers that slow enemies, fire towers that burn them and cannons with splash damage. Every 10th wave brings a crowned boss. Defeat it, build the portal and travel on.
+A monster wave arrives every minute: fast runners, armoured brutes and thieves who go straight for your cash. Build crossbows, ice and fire towers and cannons, and turn wooden towers into stone fortresses at the Armory.
+
+👑 BOSSES
+Every 10th wave a crowned boss waits for you. Summon it when you're ready, smash its shield with your axes, dodge its ground slam and beat it before it retreats. Then build the portal and travel on.
 
 🌍 6 WORLDS
 Frozen Taiga with polar bears, Golden Dunes with scorpions, Wild Jungle with gorillas, Dark Swamp with crocodiles, Ash Peak with lava golems and Crystal Realm with crystal spiders. Every world has its own music, trees and survivors. After the sixth world you start again on a higher difficulty tier, forever.

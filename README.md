@@ -40,9 +40,20 @@ Sterowanie: przeciągnij palcem w dowolnym miejscu (wirtualny joystick) albo WAS
 | `src/i18n.ts` | Teksty PL/EN |
 | `src/main.ts` | Pętla gry, zapis w `localStorage`, podróż przez portal |
 | `src/platform/` | Reklamy AdMob, zakupy Google Play i ich konfiguracja (`config.ts`) |
+| `scripts/` | Testy: bot balansu (`balance.ts`) i test wydajności (`bench.mjs`) |
 | `src/music.ts` | Muzyka generowana dla każdego świata |
 
 Logika w `game.ts` nie zależy od grafiki, więc da się ją testować i balansować symulacją (bot grający w grę) bez przeglądarki.
+
+## Testy
+
+```bash
+npm run balance   # bot przechodzi 6 światów bez grafiki: czas, przebicia palisady, walki z bossami
+npm run bench     # test wydajności: ~40 potworów, procesor spowolniony 4× jak w tanim telefonie
+```
+
+`npm run bench` potrzebuje Chromium. Zainstaluj go raz komendą `npx playwright install chromium`
+albo ustaw zmienną `CHROME_PATH` na ścieżkę do Chrome.
 
 ## Zarabianie: reklamy i zakupy
 

@@ -51,11 +51,41 @@ co ~55 s fala potworów ──► wieże + gracz bronią palisady ──► co 1
 | 5 | Popielny Szczyt 🌋 | spalone drzewa | golemy lawy | górnicy | ×50 | ×42 | $75K, 💎32, 🟣18 |
 | 6 | Kryształowa Kraina 💎 | kryształowe drzewa | kryształowe pająki | czarodzieje | ×120 | ×100 | $180K, 💚50, 💎40, 🟣30 |
 
-Po 6. świecie gra wraca do Tajgi na **Poziomie 2** (ceny ×300, potwory ×400) i tak dalej bez końca.
+Po 6. świecie gra wraca do Tajgi na **poziomie trudności 2** i tak dalej bez końca.
+Na każdym poziomie ceny rosną ×200, zdrowie potworów ×100, a moc wież ×70.
 W każdym świecie obóz budujesz od zera, a klejnoty, ulepszenia z Kuźni, skórki i misje zostają na zawsze.
+
+**Nowe potwory na wyższych poziomach trudności:**
+
+| Świat | Poziom 1 | Poziom 2 |
+|---|---|---|
+| Mroźna Tajga | niedźwiedzie polarne | yeti z rogami i lodowymi kolcami |
+| Złote Wydmy | skorpiony | plamiste hieny z grzywą |
+| Dzika Dżungla | goryle | czarne pantery ze świecącymi oczami |
+| Mroczne Bagna | krokodyle | zielone trolle z kłami i grzybami |
+| Popielny Szczyt | golemy lawy | ogniste salamandry z płonącymi kolcami |
+| Kryształowa Kraina | kryształowe pająki | kryształowe skorpiony |
+
+Od poziomu 3 potwory z obu zestawów występują na zmianę w nowych kolorach:
+cieniste (ciemny fiolet), krwawe (szkarłat) i lodowe (blady błękit).
+Pierwszy świat nowego poziomu wita gracza komunikatem, jakie potwory nadciągają.
+Ekran ukończenia 6. świata ostrzega przed kolejnym poziomem trudności.
+
+**Bossowie na wyższych poziomach są silniejsi:**
+- większa tarcza (+3% zdrowia na poziom);
+- więcej pomocników (3 → 6);
+- szybsze i szersze uderzenie w ziemię;
+- wcześniejszy szał;
+- od poziomu 2 **ryk**, który na 2,5 s ogłusza wszystkie wieże (co 9–14 s);
+- świecąca aura pod bossem.
 
 **Boss** pojawia się co 10 fal: jest 18× silniejszy, 4× mocniej bije w palisadę i ma koronę.
 Pokonanie go daje klejnoty i odblokowuje pole portalu.
+
+**Tempo poziomu 2 (bot, 12 światów):** 17–38 minut na świat.
+Palisada pada 4–16 razy, a walki z bossem trwają do 125 s. Część bossów wymaga 2–4 podejść.
+**Poziom 3:** bot przechodzi 4 z 6 światów (łącznie ok. 9 godzin gry), potem blokuje się na bossie wulkanu.
+Bot nie odkłada jednak gotówki na „Moc wież”, więc dalszy balans trzeba sprawdzić na prawdziwych graczach.
 
 **Tempo (symulacja bota, `npm run balance`):** 17–32 minuty na świat dla bota, który gra bezbłędnie, ok. 2,5 godziny na wszystkie 6.
 Człowiek potrzebuje więcej czasu. Palisada pada 3–9 razy na świat, a bossowie walczą 45–110 s z limitem 120 s.
@@ -137,6 +167,16 @@ Konfiguracja: `src/platform/config.ts`. Instrukcja podpięcia własnych kont jes
   - ranking (najwyższa fala);
   - osiągnięcia Google Play Games.
 - **Później:** wydarzenia sezonowe, nowe typy bossów, klany.
+
+## 8a. Start gry
+
+1. Natywny ekran startowy Androida (ikona).
+2. **Intro studia Coldvain** (ok. 3 s, dotknięcie pomija):
+   - kryształ lodu rysuje się kreska po kresce, a litery COLDVAIN pojawiają się po kolei;
+   - przez napis przechodzi błysk, w tle pada śnieg.
+3. **Menu główne:** logo FROST CAMP nad obozem oglądanym z krążącej kamery, aktualny świat i poziom trudności,
+   przycisk GRAJ, ustawienia i wyciszenie.
+   Po GRAJ kamera płynnie zjeżdża do gracza, a muzyka startuje (przeglądarki wymagają do tego dotknięcia).
 
 ## 9. Testy
 

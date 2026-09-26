@@ -2,7 +2,7 @@
 // Static parts of a model are merged into one vertex-coloured mesh to keep draw calls low.
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { EnemyKind, PadIcon, PetId, SurvivorKind, TowerKind, Variant } from '../data';
+import type { EnemyKind, PadIcon, PetId, SurvivorKind, Tint, TowerKind, Variant } from '../data';
 
 export const COLORS = {
   bark: 0x9c5f2e,
@@ -297,10 +297,10 @@ const enemyTemplates = new Map<string, EnemyRig>();
  * Creatures are built once per kind and variant, then cloned: clones share geometry (no per-spawn
  * merging, nothing to leak) and only get their own material for hit flashes and tints.
  */
-export function makeEnemy(kind: EnemyKind, variant: Variant = 'normal'): EnemyRig {
-  const key = `${kind}|${variant}`;
+export function makeEnemy(kind: EnemyKind, variant: Variant = 'normal', tint: Tint | null = null): EnemyRig {
+  const key = `${kind}|${variant}|${tint}`;
   let t = enemyTemplates.get(key);
-  if (!t) { t = buildEnemy(kind, variant); enemyTemplates.set(key, t); }
+  if (!t) { t = buildEnemy(kind, variant, tint); enemyTemplates.set(key, t); }
   const root = t.root.clone(true);
   const src: THREE.Object3D[] = [], dst: THREE.Object3D[] = [];
   t.root.traverse((o) => src.push(o));
@@ -315,7 +315,130 @@ export function makeEnemy(kind: EnemyKind, variant: Variant = 'normal'): EnemyRi
   };
 }
 
-function buildEnemy(kind: EnemyKind, variant: Variant): EnemyRig {
+/** Rewrites the vertex colours of every creature-coloured mesh (glowing parts and gear keep theirs). */
+function recolor(rig: EnemyRig, fn: (c: THREE.Color) => void): void {
+  const c = new THREE.Color();
+  rig.root.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (!m.isMesh || m.material !== rig.material) return;
+    m.geometry = m.geometry.clone();
+    const a = m.geometry.getAttribute('color') as THREE.BufferAttribute;
+    for (let i = 0; i < a.count; i++) {
+      c.setRGB(a.getX(i), a.getY(i), a.getZ(i));
+      fn(c);
+      a.setXYZ(i, c.r, c.g, c.b);
+    }
+  });
+}
+
+/** Swaps exact colours of the base model for a new creature's palette. */
+function palette(pairs: [number, number][]): (c: THREE.Color) => void {
+  const map = pairs.map(([a, b]) => [new THREE.Color(a), new THREE.Color(b)] as const);
+  return (c) => {
+    for (const [from, to] of map) if (Math.abs(c.r - from.r) + Math.abs(c.g - from.g) + Math.abs(c.b - from.b) < 0.004) { c.copy(to); return; }
+  };
+}
+
+const hsl = { h: 0, s: 0, l: 0 };
+/** Colour schemes for difficulty 3+: shadow (dark violet), blood (crimson), frost (pale cyan). */
+const TINT_FN: Record<Tint, (c: THREE.Color) => void> = {
+  shadow: (c) => { c.getHSL(hsl); c.setHSL(0.75, Math.min(1, 0.55 + hsl.s * 0.3), hsl.l * 0.09 + 0.012); },
+  blood: (c) => { c.getHSL(hsl); c.setHSL(0.99, Math.max(0.55, hsl.s), hsl.l * 0.7 + 0.03); },
+  frost: (c) => { c.getHSL(hsl); c.setHSL(0.54, 0.35 + hsl.s * 0.3, 0.35 + hsl.l * 0.65); },
+};
+
+interface NewKind { base: EnemyKind; colors: [number, number][]; extras: (rig: EnemyRig, add: (parts: Part[], parent: THREE.Object3D) => void) => void; }
+/** Difficulty-2 creatures: an existing skeleton (so the animations fit) with a new palette and new parts. */
+const NEW_KINDS: Partial<Record<EnemyKind, NewKind>> = {
+  yeti: {
+    base: 'gorilla',
+    colors: [[0x4f4f5e, 0xf2f6fa], [0x7a7a8e, 0xcfe3f2], [0x7d6a64, 0x7fb3d9]],
+    extras: (r, add) => {
+      add([
+        P(K(0.1, 0.42, 6), 0xe8e0c8, [-0.3, 0.32, 0], [0, 0, 0.5]), P(K(0.1, 0.42, 6), 0xe8e0c8, [0.3, 0.32, 0], [0, 0, -0.5]),
+      ], r.head!);
+      add([
+        P(K(0.12, 0.5, 5), 0xbff0ff, [-0.62, 2.1, 0], [0, 0, 0.3]), P(K(0.1, 0.4, 5), 0xbff0ff, [-0.78, 2.0, -0.1], [0, 0, 0.7]),
+        P(K(0.12, 0.5, 5), 0xbff0ff, [0.62, 2.1, 0], [0, 0, -0.3]), P(K(0.1, 0.4, 5), 0xbff0ff, [0.78, 2.0, -0.1], [0, 0, -0.7]),
+        P(K(0.1, 0.45, 5), 0xbff0ff, [0, 1.95, -0.45], [-0.4, 0, 0]),
+      ], r.body);
+    },
+  },
+  hyena: {
+    base: 'bear',
+    colors: [[0xf3f0e7, 0xc9a063], [0xd9d3c4, 0x8a6a3a], [0xebe6da, 0x3a2f28], [0xf0b8b8, 0x6b4a30]],
+    extras: (r, add) => {
+      const mane: Part[] = [];
+      for (let i = 0; i < 7; i++) mane.push(P(K(0.09, 0.32, 4), 0x3a2c20, [0, 1.72 - i * 0.05, 0.55 - i * 0.2], [-0.3, 0, 0]));
+      const spots: Part[] = [];
+      for (let i = 0; i < 8; i++) spots.push(P(S(0.09), 0x5a4228, [(i % 2 ? 0.56 : -0.56), 1.0 + (i % 3) * 0.15, 0.4 - Math.floor(i / 2) * 0.3]));
+      add([...mane, ...spots, P(K(0.1, 0.4, 5), 0x3a2c20, [0, 1.05, -1.25], [-2.2, 0, 0])], r.body);
+      add([P(K(0.11, 0.3, 4), 0xc9a063, [-0.25, 0.42, -0.02]), P(K(0.11, 0.3, 4), 0xc9a063, [0.25, 0.42, -0.02])], r.head!);
+    },
+  },
+  panther: {
+    base: 'bear',
+    colors: [[0xf3f0e7, 0x26262e], [0xd9d3c4, 0x1b1b22], [0xebe6da, 0x34343e], [0xf0b8b8, 0x3a2f3a], [0x1a1a22, 0x0d0d10]],
+    extras: (r, add) => {
+      const tail: Part[] = [];
+      for (let i = 0; i < 12; i++) tail.push(P(S(0.1 - i * 0.003), 0x26262e, [0, 1.0 + Math.sin(i * 0.3) * 0.45, -1.1 - i * 0.1]));
+      add(tail, r.body);
+      add([P(K(0.1, 0.24, 4), 0x26262e, [-0.24, 0.4, -0.02]), P(K(0.1, 0.24, 4), 0x26262e, [0.24, 0.4, -0.02])], r.head!);
+      r.head!.add(new THREE.Mesh(merged([P(S(0.06), 0xffffff, [-0.15, 0.1, 0.35]), P(S(0.06), 0xffffff, [0.15, 0.1, 0.35])]), glowMat(0xc8ff3a)));
+    },
+  },
+  troll: {
+    base: 'gorilla',
+    colors: [[0x4f4f5e, 0x5b7a3a], [0x7a7a8e, 0x8a9a5a], [0x7d6a64, 0x6b8a4a]],
+    extras: (r, add) => {
+      add([
+        P(K(0.05, 0.22, 5), 0xf4efe0, [-0.12, -0.12, 0.4], [-0.2, 0, 0]), P(K(0.05, 0.22, 5), 0xf4efe0, [0.12, -0.12, 0.4], [-0.2, 0, 0]),
+        P(S(0.13), 0x7a9a5a, [0, 0.0, 0.46], undefined, [1, 0.8, 1.3]),
+      ], r.head!);
+      add([
+        P(C(0.03, 0.05, 0.25, 6), 0xf4efe0, [-0.3, 1.9, -0.45]), P(S(0.18), 0xd8433a, [-0.3, 2.04, -0.45], undefined, [1, 0.55, 1]),
+        P(C(0.03, 0.05, 0.2, 6), 0xf4efe0, [0.25, 1.75, -0.55]), P(S(0.14), 0xd8433a, [0.25, 1.87, -0.55], undefined, [1, 0.55, 1]),
+        P(S(0.3), 0x3f6a2a, [0, 1.55, -0.6], undefined, [1.4, 0.5, 0.6]),
+      ], r.body);
+    },
+  },
+  salamander: {
+    base: 'croc',
+    colors: [[0x4f7a3a, 0xd8452a], [0x3a5a2a, 0x3a1a14], [0xb9c47a, 0xffb35a], [0xf5d23a, 0xfff2a0]],
+    extras: (r) => {
+      const spines: Part[] = [];
+      for (let i = 0; i < 6; i++) spines.push(P(K(0.1, 0.34, 5), 0xffffff, [0, 0.86, 0.75 - i * 0.3]));
+      for (let i = 0; i < 4; i++) spines.push(P(S(0.07), 0xffffff, [(i % 2 ? 0.5 : -0.5), 0.55, 0.5 - i * 0.35]));
+      r.body.add(new THREE.Mesh(merged(spines), glowMat(0xff8a1a)));
+    },
+  },
+  shardback: {
+    base: 'scorpion',
+    colors: [[0xd08a3a, 0x5fd6e8], [0x8a4d1c, 0x3a5ab8], [0xe9b56a, 0xc8f6ff], [0x2a1a10, 0xff5fd0]],
+    extras: (r) => {
+      r.body.add(new THREE.Mesh(merged([
+        P(O(0.16), 0xffffff, [-0.22, 0.78, 0.35], undefined, [0.8, 1.7, 0.8]), P(O(0.16), 0xffffff, [0.22, 0.78, 0.35], undefined, [0.8, 1.7, 0.8]),
+        P(O(0.14), 0xffffff, [0, 0.76, -0.2], undefined, [0.8, 1.8, 0.8]), P(O(0.12), 0xffffff, [0.18, 0.7, -0.6], [0, 0, -0.4], [0.8, 1.6, 0.8]),
+        P(O(0.12), 0xffffff, [-0.18, 0.7, -0.6], [0, 0, 0.4], [0.8, 1.6, 0.8]),
+      ]), glowMat(0x9ff6ff)));
+    },
+  },
+};
+
+function buildEnemy(kind: EnemyKind, variant: Variant, tint: Tint | null): EnemyRig {
+  const def = NEW_KINDS[kind];
+  const rig = buildBase(def ? def.base : kind, variant);
+  if (def) {
+    recolor(rig, palette(def.colors));
+    def.extras(rig, (parts, parent) => { parent.add(new THREE.Mesh(merged(parts), rig.material)); });
+    shadowed(rig.root);
+  }
+  if (tint) recolor(rig, TINT_FN[tint]);
+  return rig;
+}
+
+/** Builds one of the six original creatures; `rig.kind` doubles as its animation style. */
+function buildBase(kind: EnemyKind, variant: Variant): EnemyRig {
   const material = new THREE.MeshLambertMaterial({ vertexColors: true, flatShading: true });
   const root = new THREE.Group();
   const body = new THREE.Group();

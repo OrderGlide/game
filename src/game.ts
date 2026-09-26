@@ -2,7 +2,7 @@ import {
   ARMORY_BONUS, BOSS, BOOSTS, CAMP, CAMPFIRE, CASH_ZONE, CHEST, COUNTER, COUNTER_MAX, DEPOSIT_ZONE, ENEMIES, FOREST_PEN, FORGE_ZONE, GATES,
   GEMS, MINE_PEN, ORES, PADS, PAD_ORDER, PAD_SIZE, PETS, PLAYER, QUEUE, SKINS, STATS, TENT_BONUS, TOWER, TOWER_KINDS, TOWER_PADS,
   TREE, UPGRADES, VARIANTS, WAVES, WORKER,
-  WORLD, dayKey, fenceBoxes, inBox, mulberry32, nicePrice, regionOf, wallMax, worldAt,
+  WORLD, bossStats, dayKey, fenceBoxes, inBox, mulberry32, nicePrice, regionOf, wallMax, worldAt,
   type BoostId, type Box, type EnemyKind, type Gem, type PadDef, type PadId, type Price, type Pt, type Region, type Reward,
   type PetId, type SkinId, type TowerKind, type UpgradeId, type Variant, type WorldInfo,
 } from './data';
@@ -32,7 +32,7 @@ export interface Enemy {
   /** Cash stolen from the camp; dropped again when the creature dies. */
   loot: number;
   // boss only
-  shield: number; maxShield: number; stunT: number; slamT: number; slamWarnT: number; summons: number; enraged: boolean;
+  shield: number; maxShield: number; stunT: number; slamT: number; slamWarnT: number; summons: number; enraged: boolean; roarT: number;
 }
 
 /** Creatures that can fight, be targeted and be hit (thieves running off with loot can still be caught). */
@@ -61,6 +61,7 @@ export type GameEvent =
   | { type: 'worldComplete' }
   | { type: 'waveCleared' }
   | { type: 'slam'; x: number; z: number; r: number }
+  | { type: 'roar'; x: number; z: number }
   | { type: 'offline'; amount: number }
   | { type: 'tutorial'; step: number };
 
@@ -105,6 +106,10 @@ export function formatNum(n: number): string {
 
 export class Game {
   readonly world: WorldInfo;
+  /** Boss abilities for this world's difficulty. */
+  readonly boss$: ReturnType<typeof bossStats>;
+  /** While > 0 a boss roar has stunned every tower. */
+  towersStunT = 0;
   player = {
     x: PLAYER.start.x, z: PLAYER.start.z, face: Math.PI, moving: false, walkT: 0,
     stack: [] as StackLog[], chopT: 0, target: null as Tree | null, mining: null as Ore | null, mineT: 0,
@@ -148,6 +153,7 @@ export class Game {
 
   constructor(readonly profile: ProfileData, camp?: CampSave) {
     this.world = worldAt(profile.world);
+    this.boss$ = bossStats(this.world.cycle);
     const rnd = mulberry32(2024 + profile.world);
     // forest pen
     const s = TREE.spacing, f = FOREST_PEN;
@@ -639,16 +645,17 @@ export class Game {
   }
 
   private spawnEnemy(variant: Variant, boss: boolean, delay: number, at?: Pt): void {
-    const kind = this.world.def.enemy, e = ENEMIES[kind], v = VARIANTS[variant];
+    const kind = this.world.enemy, e = ENEMIES[kind], v = VARIANTS[variant];
     const hp = e.hp * WAVES.hp(this.wave) * this.world.hpMult * v.hp * (boss ? BOSS.hp : 1);
     const z = at ? at.z : boss ? 0 : -10 + this.rnd() * 20;
-    const shield = boss ? hp * BOSS.shield : 0;
+    const shield = boss ? hp * this.boss$.shield : 0;
     this.enemies.push({
       id: this.nextId++, kind, variant, boss, x: at ? at.x : 27 + this.rnd() * 4, z, hp, maxHp: hp, homeZ: Math.max(-7.3, Math.min(7.3, z)),
       speed: e.speed * v.speed * (boss ? BOSS.speed : 1), damage: e.wallDamage * v.damage * (boss ? BOSS.damage : 1),
       attackEvery: e.attackEvery,
       state: 'spawn', delay, atkT: 0, flash: 0, hitT: 0, deadT: 0, face: -Math.PI / 2, walkT: 0, slowT: 0, burnT: 0, burnDps: 0,
-      loot: 0, shield, maxShield: shield, stunT: 0, slamT: BOSS.slamEvery, slamWarnT: 0, summons: 0, enraged: false,
+      loot: 0, shield, maxShield: shield, stunT: 0, slamT: this.boss$.slamEvery, slamWarnT: 0, summons: 0, enraged: false,
+      roarT: this.boss$.roarEvery * 0.6,
     });
   }
 
@@ -726,14 +733,14 @@ export class Game {
     const f = b.hp / b.maxHp;
     if (b.summons < BOSS.summonAt.length && f <= BOSS.summonAt[b.summons]) {
       b.summons++;
-      for (let i = 0; i < BOSS.summonCount; i++) {
-        this.spawnEnemy('fast', false, i * 0.25, { x: b.x + 2 + this.rnd() * 2, z: b.z + (i - 1) * 2.2 });
+      for (let i = 0; i < this.boss$.summonCount; i++) {
+        this.spawnEnemy('fast', false, i * 0.25, { x: b.x + 2 + this.rnd() * 2, z: b.z + (i - (this.boss$.summonCount - 1) / 2) * 2 });
       }
       this.events.push({ type: 'toast', text: T.bossSummons });
       this.events.push({ type: 'burst', x: b.x, y: 1.5, z: b.z, color: 0x7a3cff, n: 24 });
       sfx('bear');
     }
-    if (!b.enraged && f <= BOSS.enrageAt) {
+    if (!b.enraged && f <= this.boss$.enrageAt) {
       b.enraged = true;
       b.speed *= 1.3;
       b.attackEvery *= 0.6;
@@ -742,9 +749,18 @@ export class Game {
     }
   }
 
-  /** Boss ground slam: telegraphed by a ring, then stuns anyone inside it. */
+  /** Boss ground slam: telegraphed by a ring, then stuns anyone inside it. Higher difficulties add a roar. */
   private updateBossSkills(b: Enemy, dt: number): boolean {
-    const p = this.player;
+    const p = this.player, bs = this.boss$;
+    if (bs.roarEvery && b.stunT <= 0 && (b.roarT -= dt) <= 0) {
+      b.roarT = bs.roarEvery * (b.enraged ? 0.75 : 1);
+      this.towersStunT = bs.roarStun;
+      this.events.push({ type: 'roar', x: b.x, z: b.z });
+      this.events.push({ type: 'toast', text: T.bossRoar, sub: T.bossRoarSub });
+      this.events.push({ type: 'shake', power: 0.45 });
+      sfx('bear');
+      vibrate(120);
+    }
     if (b.stunT > 0) {
       b.stunT -= dt;
       if (b.stunT <= 0) {
@@ -757,11 +773,11 @@ export class Game {
     if (b.slamWarnT > 0) {
       b.slamWarnT -= dt;
       if (b.slamWarnT <= 0) {
-        this.events.push({ type: 'slam', x: b.x, z: b.z, r: BOSS.slamRadius });
+        this.events.push({ type: 'slam', x: b.x, z: b.z, r: bs.slamRadius });
         this.events.push({ type: 'burst', x: b.x, y: 0.3, z: b.z, color: 0xc9a27a, n: 30 });
         this.events.push({ type: 'shake', power: 0.5 });
         sfx('thud');
-        if (dist(b.x, b.z, p.x, p.z) < BOSS.slamRadius) {
+        if (dist(b.x, b.z, p.x, p.z) < bs.slamRadius) {
           p.stunT = BOSS.slamStun;
           this.hurtPlayer(b, true);
         }
@@ -769,8 +785,8 @@ export class Game {
       return true;
     }
     b.slamT -= dt;
-    if (b.slamT <= 0 && dist(b.x, b.z, p.x, p.z) < BOSS.slamRadius + 1.5) {
-      b.slamT = BOSS.slamEvery * (b.enraged ? 0.7 : 1);
+    if (b.slamT <= 0 && dist(b.x, b.z, p.x, p.z) < bs.slamRadius + 1.5) {
+      b.slamT = bs.slamEvery * (b.enraged ? 0.7 : 1);
       b.slamWarnT = BOSS.slamWarn;
     }
     return false;
@@ -910,6 +926,7 @@ export class Game {
   }
 
   private updateTowers(dt: number): void {
+    this.towersStunT = Math.max(0, this.towersStunT - dt);
     for (const t of this.towers) {
       t.cd -= dt;
       t.recoil = Math.max(0, t.recoil - dt * 4);
@@ -923,7 +940,7 @@ export class Game {
         const score = d + (t.kind === 'ice' && b.slowT > 0 ? 8 : 0) + (t.kind === 'fire' && b.burnT > 0 ? 8 : 0) - (b.boss ? 3 : 0);
         if (score < bestD) { target = b; bestD = score; }
       }
-      if (!target) continue;
+      if (!target || this.towersStunT > 0) continue;
       t.aim = turnTo(t.aim, Math.atan2(target.x - t.x, target.z - t.z), dt * 10);
       if (t.cd <= 0) {
         t.cd = spec.every;
@@ -1364,8 +1381,8 @@ export class Game {
     const slam = this.enemies.find((b) => b.boss && b.slamWarnT > 0);
     if (slam) {
       const d = dist(slam.x, slam.z, p.x, p.z);
-      if (d < BOSS.slamRadius + 0.3) {
-        const k = (BOSS.slamRadius + 2) / Math.max(0.01, d);
+      if (d < this.boss$.slamRadius + 0.3) {
+        const k = (this.boss$.slamRadius + 2) / Math.max(0.01, d);
         return { text: T.dodge, x: slam.x + (p.x - slam.x) * k, z: slam.z + (p.z - slam.z) * k };
       }
     }

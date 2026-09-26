@@ -4,7 +4,7 @@ import * as THREE from 'three';
 import { JOY_RADIUS, type Input } from '../input';
 import { formatNum, type Game } from '../game';
 import {
-  BOOSTS, CHEST, GEMS, SKINS, STATS, UPGRADES, WORLDS, type Gem, type Levels, type Price, type Reward, type UpgradeId,
+  BOOSTS, CHEST, GEMS, SKINS, STATS, UPGRADES, worldAt, type EnemyKind, type Gem, type Levels, type Price, type Reward, type Tint, type UpgradeId,
 } from '../data';
 import { DAILY_REWARDS, type Quality, type Settings } from '../profile';
 import { BOSS, PETS, type PetId } from '../data';
@@ -64,6 +64,28 @@ const CSS = `
 #hud .joy i { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px 0 0 -24px; border-radius: 50%; background: rgba(255,255,255,.8); }
 #hud .float { position: absolute; font-size: 22px; transform: translate(-50%, -50%); text-shadow: 0 2px 0 rgba(0,0,0,.45); white-space: nowrap;
   display: flex; align-items: center; gap: 4px; }
+
+/* main menu */
+#hud .menu { position: absolute; inset: 0; z-index: 4; display: none; flex-direction: column; align-items: center; pointer-events: auto;
+  padding: calc(env(safe-area-inset-top) + 9vh) 20px calc(env(safe-area-inset-bottom) + 26px);
+  background: linear-gradient(rgba(8,16,32,.55), rgba(8,16,32,0) 38%, rgba(8,16,32,0) 60%, rgba(8,16,32,.7)); animation: menuIn .7s ease-out; }
+@keyframes menuIn { from { opacity: 0; } }
+#hud.inmenu .menu { display: flex; }
+#hud.inmenu .top, #hud.inmenu .side, #hud.inmenu .hint, #hud.inmenu .wave, #hud.inmenu .repair, #hud.inmenu .summon,
+#hud.inmenu .tut, #hud.inmenu .hand, #hud.inmenu .fps, #hud.inmenu .joy, #hud.inmenu .float, #hud.inmenu .toast { display: none !important; }
+#hud .logo { display: flex; flex-direction: column; align-items: center; line-height: .82; filter: drop-shadow(0 6px 0 rgba(10,30,60,.55)); animation: logoIn .9s cubic-bezier(.2,1.4,.4,1); }
+@keyframes logoIn { from { transform: translateY(-30px) scale(.8); opacity: 0; } }
+#hud .logo b { font-size: min(19vw, 92px); font-weight: 900; letter-spacing: .02em;
+  background: linear-gradient(180deg, #ffffff 10%, #bfeaff 55%, #4fb0ea 100%); -webkit-background-clip: text; background-clip: text; color: transparent;
+  -webkit-text-stroke: 2px rgba(20,60,110,.55); }
+#hud .logo b + b { font-size: min(15vw, 74px); background: linear-gradient(180deg, #ffe58a, #f0a020); -webkit-background-clip: text; background-clip: text; }
+#hud .tagline { margin-top: 14px; font-size: 16px; color: #e6f4ff; text-shadow: 0 2px 0 rgba(0,0,0,.45); }
+#hud .menu .grow { flex: 1; }
+#hud .menu .where { font-size: 14px; background: rgba(20,32,52,.66); padding: 6px 14px; border-radius: 999px; margin-bottom: 12px; }
+#hud .menu .play { font-size: 26px; padding: 16px 64px; border-radius: 20px; animation: pulse2 1.6s ease-in-out infinite; }
+@keyframes pulse2 { 50% { transform: scale(1.05); } }
+#hud .menu .mrow { display: flex; gap: 14px; margin-top: 18px; }
+#hud .menu .credit { margin-top: 18px; font-size: 11px; letter-spacing: .25em; color: rgba(220,240,255,.7); }
 
 /* menus */
 #hud .overlay { position: absolute; inset: 0; z-index: 5; background: rgba(10,16,30,.45); display: none; pointer-events: auto; align-items: flex-end; justify-content: center; }
@@ -212,6 +234,15 @@ export class Hud {
           <div class="bar shield" data-v="shieldBar"><i data-v="bossShield"></i></div><small data-v="bossTime"></small></div></div>
       <div class="toast"><div class="t1"></div><div class="t2"></div></div>
       <div class="joy"><i></i></div>
+      <div class="menu" data-v="menu">
+        <div class="logo"><b>FROST</b><b>CAMP</b></div>
+        <div class="tagline" data-v="tagline"></div>
+        <div class="grow"></div>
+        <div class="where" data-v="where"></div>
+        <button class="btn gold play" data-act="play" data-v="playBtn"></button>
+        <div class="mrow"><button class="round" data-act="settings">⚙️</button><button class="round" data-act="mute" data-v="menuMute">🔊</button></div>
+        <div class="credit" data-v="credit"></div>
+      </div>
       <div class="overlay" data-v="overlay"><div class="panel" data-v="panel"></div></div>`;
     document.body.appendChild(this.root);
     this.root.querySelectorAll<HTMLElement>('[data-v]').forEach((el) => { this.els[el.dataset.v!] = el; });
@@ -278,6 +309,23 @@ export class Hud {
 
   worldComplete(): void { this.open('world'); }
 
+  // ---------- main menu ----------
+
+  onPlay: (() => void) | null = null;
+  get inMenu(): boolean { return this.root.classList.contains('inmenu'); }
+
+  showMenu(where: string): void {
+    this.els.tagline.textContent = T.tagline;
+    this.els.where.textContent = where;
+    this.els.playBtn.textContent = `▶ ${T.play}`;
+    this.els.credit.textContent = `COLDVAIN · v${this.svc?.version ?? ''}`;
+    const st = this.game?.profile.settings;
+    this.els.menuMute.textContent = st && !(st.sfx || st.music) ? '🔇' : '🔊';
+    this.root.classList.add('inmenu');
+  }
+
+  private hideMenu(): void { this.root.classList.remove('inmenu'); }
+
   showFps(fps: number | null): void {
     this.els.fps.style.display = fps === null ? 'none' : 'block';
     if (fps !== null) this.els.fps.textContent = `${fps} FPS`;
@@ -328,9 +376,10 @@ export class Hud {
         const on = !(st.sfx || st.music);
         st.sfx = st.music = on;
         this.svc?.applySettings(st, false);
-        btn.textContent = on ? '🔊' : '🔇';
+        this.els.mute.textContent = this.els.menuMute.textContent = on ? '🔊' : '🔇';
         return;
       }
+      case 'play': this.hideMenu(); this.onPlay?.(); return;
       case 'forge': case 'shop': case 'daily': case 'quests': case 'settings':
         this.resetArmed = false;
         if (this.panel === act) this.close(); else this.open(act);
@@ -516,9 +565,11 @@ export class Hud {
         <button class="btn ad" data-act="offline" data-arg="ad">${T.adDouble}</button>
         <button class="btn" data-act="offline" data-arg="1">${T.collect}</button></div>`;
     } else if (this.panel === 'world') {
-      const next = WORLDS[(g.profile.world + 1) % WORLDS.length].id;
+      const nw = worldAt(g.profile.world + 1), next = nw.def.id;
+      const tierUp = nw.cycle > g.world.cycle
+        ? `<div class="note" style="color:#ff8a80">⚠️ ${fmt(T.newTierInfo, { n: nw.cycle + 1, e: enemyName(nw.enemy, nw.tint) })}</div>` : '';
       html = head(`🌍 ${T.worldDone}`, false) + `<div class="big"><div class="emoji">🌀</div>
-        <h3>${T.world[g.world.def.id]} ✓</h3>
+        <h3>${T.world[g.world.def.id]} ✓</h3>${tierUp}
         <button class="btn gold" data-act="travel">${fmt(T.travel, { w: T.world[next] })}</button></div>`;
     }
     this.els.panel.innerHTML = html;
@@ -683,6 +734,11 @@ function rewardShort(r: Reward, mult: number): string {
   if (r.cash) return `$${formatNum(r.cash * mult)}`;
   const g = GEMS.find((k) => r[k]);
   return g ? `×${r[g]}` : '';
+}
+
+/** "Polar bears", or "Polar bears (shadow)" from difficulty 3 on. */
+export function enemyName(kind: EnemyKind, tint: Tint | null): string {
+  return tint ? `${T.enemy[kind]} (${T.tint[tint]})` : T.enemy[kind];
 }
 
 function questIcon(kind: string): string {

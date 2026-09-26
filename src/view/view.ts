@@ -31,7 +31,9 @@ interface PadView {
   plate: THREE.Mesh; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture;
   icon: THREE.Group; label: THREE.Sprite; lctx: CanvasRenderingContext2D; ltex: THREE.CanvasTexture; key: string;
 }
-interface EnemyView { rig: EnemyRig; hpBg: THREE.Sprite; hpFill: THREE.Sprite; scale: number; shield?: THREE.Mesh; stars?: THREE.Group; }
+interface EnemyView {
+  rig: EnemyRig; hpBg: THREE.Sprite; hpFill: THREE.Sprite; scale: number; shield?: THREE.Mesh; stars?: THREE.Group; aura?: THREE.Mesh;
+}
 interface Bubble { sprite: THREE.Sprite; ctx: CanvasRenderingContext2D; tex: THREE.CanvasTexture; key: string; }
 
 const tmpM = new THREE.Matrix4();
@@ -171,6 +173,7 @@ export class View {
   private wallKey = '';
   private slamWarn!: { root: THREE.Group; fill: THREE.Mesh };
   private shock!: { mesh: THREE.Mesh; t: number };
+  private shockR = BOSS.slamRadius;
   private bolts = new Map<number, THREE.Mesh>();
   private boltGeo = boltGeometries();
   private petRig: PetRig | null = null;
@@ -182,6 +185,9 @@ export class View {
   private fpsFrames = 0;
   private fpsChecks = 0;
   fps = 60;
+  /** Main menu: the camera circles high above the camp; blends back to the player when the game starts. */
+  menuMode = false;
+  private menuBlend = 0;
   private gates: { rig: GateRig; x: number; z: number; open: number }[] = [];
   private pads = new Map<PadId, PadView>();
   private portal: PortalRig | null = null;
@@ -669,7 +675,12 @@ export class View {
         case 'forge': hud.openForge(); break;
         case 'worldComplete': hud.worldComplete(); break;
         case 'offline': hud.showOffline(e.amount); break;
+        case 'roar':
+          this.burst(e.x, 3, e.z, 0xff3b6d, 30, 9);
+          for (const tw of this.towers.values()) this.burst(tw.rig.root.position.x, 3.2, tw.rig.root.position.z, 0xffe066, 8, 2);
+          break;
         case 'slam':
+          this.shockR = e.r;
           this.shock.t = this.time;
           this.shock.mesh.position.x = e.x;
           this.shock.mesh.position.z = e.z;
@@ -702,7 +713,15 @@ export class View {
     this.camera.position.copy(this.camTarget).addScaledVector(CAM_DIR, this.camDist);
     this.camera.position.x += (Math.random() - 0.5) * sh;
     this.camera.position.y += (Math.random() - 0.5) * sh;
-    this.camera.lookAt(this.camTarget.x, 0.6, this.camTarget.z);
+    this.menuBlend = this.menuMode ? 1 : Math.max(0, this.menuBlend - dt * 0.9);
+    if (this.menuBlend > 0) {
+      // smoothstep between the orbiting menu shot and the gameplay camera
+      const k = this.menuBlend * this.menuBlend * (3 - 2 * this.menuBlend), a = 0.8 + t * 0.1;
+      tmpA.set(Math.sin(a) * 30, 24, Math.cos(a) * 30 - 3);
+      this.camera.position.lerp(tmpA, k);
+      tmpA.set(this.camTarget.x, 0.6, this.camTarget.z).lerp(tmpP.set(0, 0, -3), k);
+      this.camera.lookAt(tmpA);
+    } else this.camera.lookAt(this.camTarget.x, 0.6, this.camTarget.z);
     this.sun.position.set(this.camTarget.x - 10, 26, this.camTarget.z + 8);
     this.sun.target.position.copy(this.camTarget);
 
@@ -738,9 +757,9 @@ export class View {
     for (const l of this.lava) l.position.y = 0.04 + Math.sin(t * 2 + l.position.x) * 0.01;
 
     // guide arrow above the objective, plus a ground pointer when it's far away
-    this.arrow.visible = !!objective && !g.worldDone;
+    this.arrow.visible = !!objective && !g.worldDone && !this.menuMode;
     this.pointer.visible = false;
-    if (objective && !g.worldDone) {
+    if (objective && !g.worldDone && !this.menuMode) {
       this.arrow.position.set(objective.x, 3.4 + Math.abs(Math.sin(t * 4)) * 0.5, objective.z);
       this.arrow.rotation.y = t * 2;
       const dx = objective.x - p.x, dz = objective.z - p.z, d = Math.hypot(dx, dz);
@@ -974,7 +993,7 @@ export class View {
       seen.add(b.id);
       let v = this.enemies.get(b.id);
       if (!v) {
-        const rig = makeEnemy(b.kind, b.variant);
+        const rig = makeEnemy(b.kind, b.variant, g.world.tint);
         const scale = b.boss ? 2.1 : VARIANTS[b.variant].scale;
         rig.root.scale.setScalar(scale);
         // only the top graphics setting pays for creature shadows (each limb is another shadow draw)
@@ -1001,6 +1020,15 @@ export class View {
           }
           v.stars.position.y = rig.height + 0.25;
           rig.root.add(v.stars);
+          if (g.world.cycle > 0) {
+            // bosses on higher difficulties stand in a glowing aura
+            const aura = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.25, 32),
+              new THREE.MeshBasicMaterial({ color: g.world.cycle % 2 ? 0xff3b6d : 0x9b5cff, transparent: true, opacity: 0.55, depthWrite: false }));
+            aura.rotation.x = -Math.PI / 2;
+            aura.position.y = 0.05;
+            rig.root.add(aura);
+            v.aura = aura;
+          }
         }
         this.enemies.set(b.id, v);
       }
@@ -1016,6 +1044,10 @@ export class View {
       if (v.stars) {
         v.stars.visible = b.stunT > 0;
         v.stars.rotation.y = t * 5;
+      }
+      if (v.aura) {
+        v.aura.scale.setScalar(1 + Math.sin(t * 3) * 0.08);
+        v.aura.visible = b.state !== 'dead';
       }
       const attack = b.state === 'attack'
         ? Math.max(0, Math.sin((b.atkT / b.attackEvery) * Math.PI))
@@ -1043,13 +1075,14 @@ export class View {
     this.slamWarn.root.visible = !!boss;
     if (boss) {
       this.slamWarn.root.position.set(boss.x, 0, boss.z);
+      this.slamWarn.root.scale.setScalar(g.boss$.slamRadius / BOSS.slamRadius);
       const k = Math.max(0.01, 1 - boss.slamWarnT / BOSS.slamWarn);
       this.slamWarn.fill.scale.setScalar(k);
     }
     const sh = this.shock, age = this.time - sh.t;
     sh.mesh.visible = age < 0.5;
     if (sh.mesh.visible) {
-      sh.mesh.scale.setScalar(0.5 + (age / 0.5) * BOSS.slamRadius * 1.1);
+      sh.mesh.scale.setScalar(0.5 + (age / 0.5) * this.shockR * 1.1);
       (sh.mesh.material as THREE.MeshBasicMaterial).opacity = 1 - age / 0.5;
     }
     for (const [id, v] of this.enemies) {
@@ -1060,6 +1093,7 @@ export class View {
       v.hpFill.material.dispose();
       if (v.shield) { disposeTree(v.shield); (v.shield.material as THREE.Material).dispose(); }
       if (v.stars) disposeTree(v.stars);
+      if (v.aura) { disposeTree(v.aura); (v.aura.material as THREE.Material).dispose(); }
       this.enemies.delete(id);
     }
   }
@@ -1085,7 +1119,7 @@ export class View {
       }
       v.t = Math.min(1, v.t + dt * 2.2);
       v.rig.root.scale.setScalar(Math.max(0.01, easeOutBack(v.t)));
-      v.rig.head.rotation.y = tw.aim;
+      v.rig.head.rotation.y = tw.aim + (g.towersStunT > 0 ? Math.sin(t * 30 + tw.x) * 0.25 : 0);
       v.rig.stock.position.z = -tw.recoil * 0.25;
       v.rig.flag.rotation.y = Math.sin(t * 3 + tw.x) * 0.3;
     }

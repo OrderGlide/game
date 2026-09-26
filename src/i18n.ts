@@ -1,4 +1,4 @@
-import type { BoostId, Gem, PadId, PetId, QuestKind, SkinId, UpgradeId, WorldId } from './data';
+import type { BoostId, EnemyKind, Gem, PadId, PetId, QuestKind, SkinId, Tint, UpgradeId, WorldId } from './data';
 import type { ProductId } from './platform/config';
 
 const pl = {
@@ -49,6 +49,22 @@ const pl = {
   bossFight: 'BOSS atakuje! Broń palisady',
   bossComing: 'Nadciąga BOSS!',
   bossDown: 'Boss pokonany!',
+  bossRoar: 'Ryk bossa!',
+  bossRoarSub: 'Wieże ogłuszone na chwilę',
+  enemy: {
+    bear: 'Niedźwiedzie polarne', scorpion: 'Skorpiony', gorilla: 'Goryle', croc: 'Krokodyle', golem: 'Golemy lawy',
+    spider: 'Kryształowe pająki', yeti: 'Yeti', hyena: 'Hieny pustyni', panther: 'Czarne pantery', troll: 'Trolle bagienne',
+    salamander: 'Ogniste salamandry', shardback: 'Kryształowe skorpiony',
+  } as Record<EnemyKind, string>,
+  tint: { shadow: 'cieniste', blood: 'krwawe', frost: 'lodowe' } as Record<Tint, string>,
+  newTier: 'Poziom trudności {n}!',
+  newTierInfo: 'Następny: poziom trudności {n}. {e}, silniejsi bossowie z rykiem i ceny ×300.',
+  tierEnemies: 'Nadciągają: {e}',
+  play: 'GRAJ',
+  tapToSkip: 'DOTKNIJ, ABY POMINĄĆ',
+  newGame: 'Nowa gra',
+  studio: 'Studio Coldvain',
+  tagline: 'Buduj obóz. Przetrwaj hordy.',
   bossFled: 'Boss się wycofał!',
   bossFledSub: 'Ulepsz obóz i wezwij go ponownie',
   shieldBroken: 'Tarcza rozbita!',
@@ -197,6 +213,22 @@ const en: Dict = {
   bossFight: 'BOSS attack! Hold the palisade',
   bossComing: 'A BOSS is coming!',
   bossDown: 'Boss defeated!',
+  bossRoar: 'Boss roar!',
+  bossRoarSub: 'Your towers are stunned for a moment',
+  enemy: {
+    bear: 'Polar bears', scorpion: 'Scorpions', gorilla: 'Gorillas', croc: 'Crocodiles', golem: 'Lava golems',
+    spider: 'Crystal spiders', yeti: 'Yetis', hyena: 'Desert hyenas', panther: 'Black panthers', troll: 'Swamp trolls',
+    salamander: 'Fire salamanders', shardback: 'Crystal scorpions',
+  } as Record<EnemyKind, string>,
+  tint: { shadow: 'shadow', blood: 'blood', frost: 'frost' } as Record<Tint, string>,
+  newTier: 'Difficulty {n}!',
+  newTierInfo: 'Next: difficulty {n}. {e}, stronger bosses that roar and prices ×300.',
+  tierEnemies: 'Incoming: {e}',
+  play: 'PLAY',
+  tapToSkip: 'TAP TO SKIP',
+  newGame: 'New game',
+  studio: 'Coldvain Studio',
+  tagline: 'Build the camp. Survive the hordes.',
   bossFled: 'The boss retreated!',
   bossFledSub: 'Upgrade your camp and summon it again',
   shieldBroken: 'Shield broken!',

@@ -35,7 +35,10 @@ Co minutę nadciąga fala potworów: szybcy biegacze, opancerzone bestie i złod
 Co 10. fala czeka boss w koronie. Wezwij go, gdy będziesz gotowy. Rozbij toporami jego tarczę, uciekaj z kręgu przed uderzeniem i pokonaj go, zanim się wycofa. Potem zbuduj portal i ruszaj dalej.
 
 🌍 6 ŚWIATÓW
-Mroźna Tajga z niedźwiedziami polarnymi, Złote Wydmy ze skorpionami, Dzika Dżungla z gorylami, Mroczne Bagna z krokodylami, Popielny Szczyt z golemami lawy i Kryształowa Kraina z kryształowymi pająkami. Każdy świat ma własną muzykę, drzewa i ocalałych. Po szóstym świecie zaczynasz od nowa na wyższym poziomie trudności, bez końca.
+Mroźna Tajga z niedźwiedziami polarnymi, Złote Wydmy ze skorpionami, Dzika Dżungla z gorylami, Mroczne Bagna z krokodylami, Popielny Szczyt z golemami lawy i Kryształowa Kraina z kryształowymi pająkami. Każdy świat ma własną muzykę, drzewa i ocalałych.
+
+🔥 POZIOMY TRUDNOŚCI
+Po szóstym świecie wchodzisz na wyższy poziom trudności: yeti, hieny, czarne pantery, trolle, ogniste salamandry i kryształowe skorpiony zastępują dawnych wrogów, a bossowie dostają ryk ogłuszający wieże. Dalej potwory wracają w cienistych, krwawych i lodowych barwach, bez końca.
 
 🎁 CODZIENNIE COŚ NOWEGO
 Nagrody dzienne z 7-dniową serią, 3 misje dziennie, darmowe skrzynie, skórki kurtki i zwierzaki pomocnicy: lisek, sowa i mały smok.
@@ -78,7 +81,10 @@ A monster wave arrives every minute: fast runners, armoured brutes and thieves w
 Every 10th wave a crowned boss waits for you. Summon it when you're ready, smash its shield with your axes, dodge its ground slam and beat it before it retreats. Then build the portal and travel on.
 
 🌍 6 WORLDS
-Frozen Taiga with polar bears, Golden Dunes with scorpions, Wild Jungle with gorillas, Dark Swamp with crocodiles, Ash Peak with lava golems and Crystal Realm with crystal spiders. Every world has its own music, trees and survivors. After the sixth world you start again on a higher difficulty tier, forever.
+Frozen Taiga with polar bears, Golden Dunes with scorpions, Wild Jungle with gorillas, Dark Swamp with crocodiles, Ash Peak with lava golems and Crystal Realm with crystal spiders. Every world has its own music, trees and survivors.
+
+🔥 DIFFICULTY TIERS
+After the sixth world the next difficulty begins: yetis, hyenas, black panthers, trolls, fire salamanders and crystal scorpions replace the old foes, and bosses gain a roar that stuns your towers. After that, monsters return in shadow, blood and frost colours, forever.
 
 🎁 SOMETHING NEW EVERY DAY
 Daily rewards with a 7-day streak, 3 daily quests, free chests, jacket skins and helper pets: a fox, an owl and a baby dragon.

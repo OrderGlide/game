@@ -60,7 +60,9 @@ export const ORES: Record<Gem, OreInfo> = {
 
 // ---------- enemies ----------
 
-export type EnemyKind = 'bear' | 'scorpion' | 'gorilla' | 'croc' | 'golem' | 'spider';
+/** The first six roam the worlds on difficulty 1; the other six replace them on difficulty 2. */
+export type EnemyKind = 'bear' | 'scorpion' | 'gorilla' | 'croc' | 'golem' | 'spider'
+  | 'yeti' | 'hyena' | 'panther' | 'troll' | 'salamander' | 'shardback';
 export const ENEMIES: Record<EnemyKind, { hp: number; speed: number; wallDamage: number; attackEvery: number }> = {
   bear: { hp: 35, speed: 2.3, wallDamage: 4, attackEvery: 1.5 },
   scorpion: { hp: 30, speed: 2.9, wallDamage: 3, attackEvery: 1.1 },
@@ -68,7 +70,16 @@ export const ENEMIES: Record<EnemyKind, { hp: number; speed: number; wallDamage:
   croc: { hp: 40, speed: 2.0, wallDamage: 5, attackEvery: 1.3 },
   golem: { hp: 55, speed: 1.7, wallDamage: 7, attackEvery: 1.9 },
   spider: { hp: 32, speed: 3.2, wallDamage: 4, attackEvery: 1.0 },
+  yeti: { hp: 42, speed: 2.3, wallDamage: 5, attackEvery: 1.4 },
+  hyena: { hp: 26, speed: 3.3, wallDamage: 3, attackEvery: 0.9 },
+  panther: { hp: 30, speed: 3.5, wallDamage: 4, attackEvery: 0.9 },
+  troll: { hp: 46, speed: 1.9, wallDamage: 6, attackEvery: 1.6 },
+  salamander: { hp: 42, speed: 2.4, wallDamage: 5, attackEvery: 1.2 },
+  shardback: { hp: 36, speed: 3.0, wallDamage: 5, attackEvery: 1.0 },
 };
+/** Colour schemes creatures wear from difficulty 3 on. */
+export type Tint = 'shadow' | 'blood' | 'frost';
+export const TINTS: Tint[] = ['shadow', 'blood', 'frost'];
 /** Fast runners and armoured brutes mix into later waves. */
 export type Variant = 'normal' | 'fast' | 'tank';
 export const VARIANTS: Record<Variant, { hp: number; speed: number; damage: number; scale: number; reward: number }> = {
@@ -107,6 +118,19 @@ export const BOSS = {
   summonAt: [0.66, 0.33], summonCount: 3,
   enrageAt: 0.3,
 };
+/** Bosses on higher difficulties bring bigger shields, more helpers, faster slams and a tower-stunning roar. */
+export function bossStats(cycle: number) {
+  return {
+    shield: Math.min(0.22, BOSS.shield + 0.03 * cycle),
+    summonCount: Math.min(6, BOSS.summonCount + cycle),
+    slamEvery: BOSS.slamEvery * Math.max(0.6, 1 - 0.12 * cycle),
+    slamRadius: BOSS.slamRadius + Math.min(1.2, 0.3 * cycle),
+    enrageAt: Math.min(0.45, BOSS.enrageAt + 0.05 * cycle),
+    /** Seconds between roars that stop all towers for `roarStun` s (0 = never). */
+    roarEvery: cycle >= 1 ? Math.max(9, 16 - 2 * cycle) : 0,
+    roarStun: 2.5,
+  };
+}
 export const wallMax = (level: number) => 150 + 70 * level;
 export const TOWER = { range: 14.5, every: 1.2, damage: 14 };
 /** Each Armory level adds tower damage and makes every tower look sturdier. */
@@ -131,6 +155,8 @@ export type SurvivorKind = 'santa' | 'nomad' | 'explorer' | 'fisher' | 'miner' |
 export interface WorldDef {
   id: WorldId;
   enemy: EnemyKind;
+  /** Creature that takes over on difficulty 2. */
+  enemy2: EnemyKind;
   tree: TreeKind;
   survivor: SurvivorKind;
   /** Chance of each ore type in the mine. */
@@ -144,41 +170,50 @@ export interface WorldDef {
 
 export const WORLDS: WorldDef[] = [
   {
-    id: 'winter', enemy: 'bear', tree: 'pine', survivor: 'santa', ores: { em: 0.72, di: 0.23, ob: 0.05 },
+    id: 'winter', enemy: 'bear', enemy2: 'yeti', tree: 'pine', survivor: 'santa', ores: { em: 0.72, di: 0.23, ob: 0.05 },
     priceMult: 1, hpMult: 1, towerMult: 1, portal: { cash: 1500, em: 25, di: 6 }, bossGems: { em: 12, di: 3 },
   },
   {
-    id: 'desert', enemy: 'scorpion', tree: 'palm', survivor: 'nomad', ores: { em: 0.5, di: 0.38, ob: 0.12 },
+    id: 'desert', enemy: 'scorpion', enemy2: 'hyena', tree: 'palm', survivor: 'nomad', ores: { em: 0.5, di: 0.38, ob: 0.12 },
     priceMult: 3, hpMult: 2.5, towerMult: 2, portal: { cash: 4500, em: 30, di: 15, ob: 3 }, bossGems: { em: 15, di: 6, ob: 1 },
   },
   {
-    id: 'jungle', enemy: 'gorilla', tree: 'jungle', survivor: 'explorer', ores: { em: 0.42, di: 0.42, ob: 0.16 },
+    id: 'jungle', enemy: 'gorilla', enemy2: 'panther', tree: 'jungle', survivor: 'explorer', ores: { em: 0.42, di: 0.42, ob: 0.16 },
     priceMult: 8, hpMult: 6.5, towerMult: 4, portal: { cash: 12000, em: 35, di: 22, ob: 6 }, bossGems: { em: 18, di: 8, ob: 2 },
   },
   {
-    id: 'swamp', enemy: 'croc', tree: 'willow', survivor: 'fisher', ores: { em: 0.35, di: 0.42, ob: 0.23 },
+    id: 'swamp', enemy: 'croc', enemy2: 'troll', tree: 'willow', survivor: 'fisher', ores: { em: 0.35, di: 0.42, ob: 0.23 },
     priceMult: 20, hpMult: 18, towerMult: 8, portal: { cash: 30000, em: 40, di: 28, ob: 10 }, bossGems: { em: 20, di: 10, ob: 4 },
   },
   {
-    id: 'volcano', enemy: 'golem', tree: 'charred', survivor: 'miner', ores: { em: 0.25, di: 0.37, ob: 0.38 },
+    id: 'volcano', enemy: 'golem', enemy2: 'salamander', tree: 'charred', survivor: 'miner', ores: { em: 0.25, di: 0.37, ob: 0.38 },
     priceMult: 50, hpMult: 42, towerMult: 16, portal: { cash: 75000, di: 32, ob: 18 }, bossGems: { di: 12, ob: 6 },
   },
   {
-    id: 'crystal', enemy: 'spider', tree: 'crystal', survivor: 'wizard', ores: { em: 0.25, di: 0.35, ob: 0.4 },
+    id: 'crystal', enemy: 'spider', enemy2: 'shardback', tree: 'crystal', survivor: 'wizard', ores: { em: 0.25, di: 0.35, ob: 0.4 },
     priceMult: 120, hpMult: 100, towerMult: 32, portal: { cash: 180000, em: 50, di: 40, ob: 30 }, bossGems: { em: 25, di: 15, ob: 10 },
   },
 ];
 
-export interface WorldInfo { n: number; def: WorldDef; cycle: number; priceMult: number; hpMult: number; towerMult: number; }
-/** World number n (0-based) cycles through the 6 themes, each cycle harder than the last. */
+export interface WorldInfo {
+  n: number; def: WorldDef; cycle: number; priceMult: number; hpMult: number; towerMult: number;
+  /** Creature of this world at this difficulty, and its colour scheme (difficulty 3+). */
+  enemy: EnemyKind; tint: Tint | null;
+}
+/**
+ * World number n (0-based) cycles through the 6 themes, each cycle (difficulty) harder than the last:
+ * difficulty 2 brings new creatures, from difficulty 3 old and new ones alternate in new colours.
+ */
 export function worldAt(n: number): WorldInfo {
   const def = WORLDS[n % WORLDS.length];
   const cycle = Math.floor(n / WORLDS.length);
   return {
     n, def, cycle,
-    priceMult: def.priceMult * 300 ** cycle,
-    hpMult: def.hpMult * 400 ** cycle,
-    towerMult: def.towerMult * 64 ** cycle,
+    enemy: cycle % 2 === 1 ? def.enemy2 : def.enemy,
+    tint: cycle >= 2 ? TINTS[(cycle - 2) % TINTS.length] : null,
+    priceMult: def.priceMult * 200 ** cycle,
+    hpMult: def.hpMult * 100 ** cycle,
+    towerMult: def.towerMult * 70 ** cycle,
   };
 }
 

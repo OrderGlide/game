@@ -48,7 +48,7 @@ for (const quality of (process.env.Q ?? 'high,low').split(',')) {
     };
     localStorage.setItem('frost-camp-save-v3', JSON.stringify({ v: 3, profile, camp }));
   }, quality);
-  await page.goto(url);
+  await page.goto(url + '?play');
   await page.waitForFunction(() => window.game && window.view, null, { timeout: 30000 });
   await page.waitForTimeout(1500);
   const cdp = await ctx.newCDPSession(page);

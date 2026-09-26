@@ -9,9 +9,11 @@ import { T, fmt, setLang } from './i18n';
 import { initAds, isNative, showInterstitial, showRewarded } from './platform/ads';
 import { billingAvailable, loadPrices, ownedProducts, priceOf, purchase } from './platform/billing';
 import { INTERSTITIAL } from './platform/config';
+import { playIntro } from './intro';
+import { enemyName } from './view/hud';
 
 const SAVE_KEY = 'frost-camp-save-v3';
-const VERSION = '0.5.0';
+const VERSION = '0.6.0';
 
 interface SaveFile { v: 3; profile: ProfileData; camp: CampSave | null; }
 
@@ -91,8 +93,31 @@ input.onFirstInteraction = unlockAudio;
 
 function announceWorld(): void {
   const w = game.world;
-  hud.showToast(`${fmt(T.worldN, { n: w.n + 1 })}: ${T.world[w.def.id]}`, w.cycle ? fmt(T.cycle, { n: w.cycle + 1 }) : '');
+  // the first world of a new difficulty introduces its creatures
+  if (w.cycle > 0 && w.n % 6 === 0) hud.showToast(fmt(T.newTier, { n: w.cycle + 1 }), fmt(T.tierEnemies, { e: enemyName(w.enemy, w.tint) }));
+  else hud.showToast(`${fmt(T.worldN, { n: w.n + 1 })}: ${T.world[w.def.id]}`, w.cycle ? fmt(T.cycle, { n: w.cycle + 1 }) : '');
 }
+
+/** "World 3: Wild Jungle · Difficulty 2" for the main menu. */
+function whereText(): string {
+  const w = game.world;
+  return `${fmt(T.worldN, { n: w.n + 1 })}: ${T.world[w.def.id]}${w.cycle ? ` · ${fmt(T.cycle, { n: w.cycle + 1 })}` : ''}`;
+}
+
+// launch: studio intro → main menu over the circling camp → play
+type Phase = 'menu' | 'play';
+// dev builds opened with ?play skip straight into the game (automated tests)
+const skipIntro = import.meta.env.DEV && new URLSearchParams(location.search).has('play');
+let phase: Phase = skipIntro ? 'play' : 'menu';
+view.menuMode = !skipIntro;
+if (!skipIntro) void playIntro(T.tapToSkip).then(() => hud.showMenu(whereText()));
+hud.onPlay = () => {
+  unlockAudio();
+  phase = 'play';
+  view.menuMode = false;
+  if (!saved.camp) announceWorld();
+  if (game.worldDone) hud.worldComplete();
+};
 
 hud.onTravel = () => {
   profile.world++;
@@ -104,8 +129,6 @@ hud.onTravel = () => {
   announceWorld();
 };
 
-if (!saved.camp) announceWorld();
-if (game.worldDone) hud.worldComplete();
 
 // ads & store (Android only; the browser build uses a simulated ad)
 if (isNative) {
@@ -131,6 +154,12 @@ let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min(0.05, (now - last) / 1000);
   last = now;
+  if (phase === 'menu') {
+    // the camp stands still behind the menu; queued events (offline earnings…) wait for play
+    view.update(game, dt, null);
+    requestAnimationFrame(frame);
+    return;
+  }
   const d = hud.menuOpen ? { x: 0, y: 0 } : input.direction();
   game.update(dt, { x: d.x, z: d.y });
   if (game.events.some((e) => e.type === 'waveCleared')) maybeInterstitial();

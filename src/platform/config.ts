@@ -12,7 +12,7 @@ export const ADMOB = {
    * Serves Google's test ads instead of real ones. Switch to false only in the build you upload to
    * Google Play: tapping a real ad in your own game is what gets an AdMob account banned for good.
    */
-  testing: true,
+  testing: false,
 };
 
 /** Interstitials are rare on purpose: never in the first minutes, never back to back. */

@@ -9,3 +9,4 @@ android/local.properties
 android/.idea/
 *.keystore
 *.jks
+*.jks.b64

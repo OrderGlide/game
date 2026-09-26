@@ -458,12 +458,13 @@ export class Hud {
         const ready = g.freeChestReady();
         const wait = Math.max(0, (g.profile.freeChestAt - g.now()) / 1000);
         body = `<div class="row"><div class="ic">🎁</div><div><div class="nm">${T.freeChest}</div>
+            <div class="info">${T.freeChestOdds}</div>
             <div class="info">${ready ? '' : fmt(T.readyIn, { t: fmtTime(wait) })}</div></div>
             ${ready ? `<button class="btn" data-act="chest" data-arg="free">${T.open}</button>`
               : g.adReady('chest') ? `<button class="btn ad" data-act="adChest">${T.adOpenNow}</button>`
                 : `<button class="btn" disabled>${T.open}</button>`}</div>
           <div class="row"><div class="ic">💎</div><div><div class="nm">${T.gemChest}</div>
-            <div class="info">${gemHtml('em')} ${gemHtml('di')} ${gemHtml('ob')}</div>
+            <div class="info">${T.gemChestOdds}</div>
             <div class="cost">${priceHtml(CHEST.price, g)}</div></div>
             <button class="btn gold" data-act="chest" data-arg="gem" ${g.canAfford(CHEST.price) ? '' : 'disabled'}>${T.open}</button></div>`;
       }

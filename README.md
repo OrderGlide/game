@@ -66,10 +66,22 @@ W przeglądarce zamiast reklamy pokazuje się oznaczona „Reklama testowa”, a
    Ceny w grze wczytają się automatycznie ze sklepu.
 3. **Profil płatności** w Play Console i dane do wypłat w AdMob (konto bankowe, dane podatkowe). Wymaga ukończonych 18 lat.
 4. **Polityka prywatności:** reklamy zbierają identyfikator reklamowy, więc potrzebny jest publiczny link do polityki prywatności
-   i poprawnie wypełniona sekcja „Bezpieczeństwo danych” w Play Console.
+   i poprawnie wypełniona sekcja „Bezpieczeństwo danych” w Play Console. Obie rzeczy są gotowe, patrz niżej.
 5. Zakupy są sprawdzane tylko na telefonie. Przy dużej grze warto dodać weryfikację na serwerze.
 
 ## Budowanie na Androida
+
+### Bez instalowania czegokolwiek: GitHub Actions
+
+Każdy push buduje grę na serwerach GitHuba (`.github/workflows/android.yml`):
+
+1. Wejdź w repozytorium → zakładka **Actions** → ostatni przebieg **Android build** z zieloną ikonką.
+2. Na dole strony, w sekcji **Artifacts**, pobierz `frost-camp-debug-apk` (plik .zip z `app-debug.apk`).
+3. Wyślij `app-debug.apk` na telefon i otwórz go. Android zapyta o zgodę na instalację z nieznanego źródła.
+
+Wersja debug jest do testów. Do Google Play potrzebny jest podpisany plik `.aab`, opisany niżej.
+
+### Na własnym komputerze
 
 Wymagania: [Android Studio](https://developer.android.com/studio) (z SDK) i JDK 21.
 
@@ -79,19 +91,53 @@ npm run android    # build web + cap sync + otwiera projekt w Android Studio
 
 W Android Studio: **Run ▶** na telefonie/emulatorze.
 
+### Klucz podpisu i plik .aab do Google Play
+
+1. Utwórz klucz **raz** i przechowuj go bezpiecznie (np. w menedżerze haseł i na pendrivie). Bez niego nie wydasz aktualizacji,
+   chyba że włączysz podpisywanie przez Google Play (zalecane, Play Console proponuje je przy pierwszym wydaniu).
+
+   ```bash
+   keytool -genkeypair -v -keystore frost-camp.jks -alias frostcamp -keyalg RSA -keysize 2048 -validity 10000
+   base64 -w0 frost-camp.jks > frost-camp.jks.b64    # na macOS: base64 -i frost-camp.jks -o frost-camp.jks.b64
+   ```
+
+2. W repozytorium: **Settings → Secrets and variables → Actions → New repository secret** dodaj 4 sekrety:
+
+   | Nazwa | Wartość |
+   |---|---|
+   | `KEYSTORE_BASE64` | zawartość pliku `frost-camp.jks.b64` |
+   | `KEYSTORE_PASSWORD` | hasło do keystore |
+   | `KEY_ALIAS` | `frostcamp` |
+   | `KEY_PASSWORD` | hasło do klucza |
+
+3. Od następnego pusha w **Artifacts** pojawi się też `frost-camp-release-aab`, gotowy do wgrania do Play Console.
+   `versionCode` rośnie sam z każdym przebiegiem CI. `versionName` zmieniasz w `android/app/build.gradle`.
+
+**Nigdy nie commituj pliku `.jks` ani haseł.** `.gitignore` blokuje `*.jks`/`*.keystore`.
+
 ### Wydanie w Google Play
 
 1. **Zmień `appId`** w `capacitor.config.ts` **oraz** `applicationId`/`namespace` w `android/app/build.gradle`
-   na własny (np. `pl.twojanazwa.frostcamp`) — po pierwszej publikacji nie da się go zmienić.
-2. Podbijaj `versionCode` (+1 przy każdym wydaniu) i `versionName` w `android/app/build.gradle`.
-3. Android Studio → **Build → Generate Signed App Bundle** → utwórz keystore
-   (**zachowaj go i hasła w bezpiecznym miejscu**, nie commituj — `.gitignore` już blokuje `*.jks`/`*.keystore`).
-4. Załóż konto w [Google Play Console](https://play.google.com/console) (jednorazowo 25 USD).
-5. Nowe konta prywatne muszą przejść **test zamknięty: min. 12 testerów przez 14 dni** zanim dostaną dostęp do produkcji.
-6. Wgraj plik `.aab`, uzupełnij: opis, ikonę 512×512, grafikę 1024×500, min. 2 zrzuty ekranu,
-   politykę prywatności (URL), ankietę o treści (PEGI), sekcję „Bezpieczeństwo danych”.
+   na własny (np. `pl.twojanazwa.frostcamp`). Po pierwszej publikacji nie da się go zmienić.
+2. Załóż konto w [Google Play Console](https://play.google.com/console) (jednorazowo 25 USD, wymaga ukończonych 18 lat).
+3. Nowe konta prywatne muszą przejść **test zamknięty: min. 12 testerów przez 14 dni**, zanim dostaną dostęp do produkcji.
+4. Wgraj plik `.aab` i wypełnij kartę sklepu. Gotowe teksty i odpowiedzi są w [`docs/store-listing.md`](docs/store-listing.md):
+   tytuł, opisy PL/EN, kategoria, ankieta treści i sekcja „Bezpieczeństwo danych”.
+5. Grafiki są w folderze [`store/`](store): ikona 512×512, grafika promocyjna 1024×500 i 6 zrzutów ekranu 1080×1920.
 
-Ikona i splash są generowane z `assets/icon.png` (1024×1024, wyrenderowana z modeli gry):
+### Polityka prywatności
+
+Gotowa polityka (PL + EN) jest w [`docs/privacy-policy.html`](docs/privacy-policy.html).
+Przed publikacją wpisz swój adres e-mail w miejsce `KONTAKT@example.com` (dwa miejsca w pliku).
+
+Google wymaga publicznego adresu URL. Najprostsze opcje:
+- **GitHub Pages:** Settings → Pages → Source: *Deploy from a branch*, branch `main`, folder `/docs`.
+  Adres: `https://<użytkownik>.github.io/<repo>/privacy-policy.html`. Dla prywatnego repozytorium wymaga płatnego planu GitHuba.
+- **Google Sites** (za darmo): utwórz stronę i wklej do niej treść polityki.
+
+### Ikona i splash
+
+Są generowane z `assets/icon.png` (1024×1024, wyrenderowana z modeli gry):
 
 ```bash
 npx @capacitor/assets generate --android --iconBackgroundColor '#8fc3f0' --splashBackgroundColor '#dde8f3'

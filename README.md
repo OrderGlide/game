@@ -139,12 +139,15 @@ W Android Studio: **Run ▶** na telefonie/emulatorze.
 ### Polityka prywatności
 
 Gotowa polityka (PL + EN) jest w [`docs/privacy-policy.html`](docs/privacy-policy.html).
-Przed publikacją wpisz swój adres e-mail w miejsce `KONTAKT@example.com` (dwa miejsca w pliku).
+Adres kontaktowy to alias przekierowujący na prywatną skrzynkę — można go wymienić w jednym miejscu w pliku.
 
-Google wymaga publicznego adresu URL. Najprostsze opcje:
-- **GitHub Pages:** Settings → Pages → Source: *Deploy from a branch*, branch `main`, folder `/docs`.
-  Adres: `https://<użytkownik>.github.io/<repo>/privacy-policy.html`. Dla prywatnego repozytorium wymaga płatnego planu GitHuba.
-- **Google Sites** (za darmo): utwórz stronę i wklej do niej treść polityki.
+Google wymaga publicznego adresu URL. Wystawiamy ją przez **GitHub Pages**:
+Settings → Pages → Source: *Deploy from a branch*, gałąź domyślna, folder `/docs`.
+
+- Strona: https://orderglide.github.io/game/
+- Polityka (ten link idzie do Play Console): https://orderglide.github.io/game/privacy-policy.html
+
+Dla prywatnego repozytorium GitHub Pages wymaga płatnego planu; wtedy alternatywą są darmowe Google Sites.
 
 ### Ikona i splash
 

@@ -134,6 +134,9 @@ W Android Studio: **Run ▶** na telefonie/emulatorze.
    Po pierwszym wgraniu do Play Console nie da się jej zmienić.
 2. Załóż konto w [Google Play Console](https://play.google.com/console) (jednorazowo 25 USD, wymaga ukończonych 18 lat).
 3. Nowe konta prywatne muszą przejść **test zamknięty: min. 12 testerów przez 14 dni**, zanim dostaną dostęp do produkcji.
+Krok po kroku, z gotowymi odpowiedziami do wszystkich ankiet Play Console i listą pułapek:
+[`docs/wydawanie-gry.md`](docs/wydawanie-gry.md). Ten sam przewodnik działa przy kolejnych grach studia.
+
 4. Wgraj plik `.aab` i wypełnij kartę sklepu. Gotowe teksty i odpowiedzi są w [`docs/store-listing.md`](docs/store-listing.md):
    tytuł, opisy PL/EN, kategoria, ankieta treści i sekcja „Bezpieczeństwo danych”.
 5. Grafiki są w folderze [`store/`](store): ikona 512×512, grafika promocyjna 1024×500 i 6 zrzutów ekranu 1080×1920.

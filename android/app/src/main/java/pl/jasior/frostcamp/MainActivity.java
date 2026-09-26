@@ -1,4 +1,4 @@
-package com.orderglide.stackisland;
+package pl.jasior.frostcamp;
 
 import com.getcapacitor.BridgeActivity;
 

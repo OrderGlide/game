@@ -117,8 +117,8 @@ W Android Studio: **Run ▶** na telefonie/emulatorze.
 
 ### Wydanie w Google Play
 
-1. **Zmień `appId`** w `capacitor.config.ts` **oraz** `applicationId`/`namespace` w `android/app/build.gradle`
-   na własny (np. `pl.twojanazwa.frostcamp`). Po pierwszej publikacji nie da się go zmienić.
+1. Nazwa pakietu to **`pl.jasior.frostcamp`** (`capacitor.config.ts` i `android/app/build.gradle`).
+   Po pierwszym wgraniu do Play Console nie da się jej zmienić.
 2. Załóż konto w [Google Play Console](https://play.google.com/console) (jednorazowo 25 USD, wymaga ukończonych 18 lat).
 3. Nowe konta prywatne muszą przejść **test zamknięty: min. 12 testerów przez 14 dni**, zanim dostaną dostęp do produkcji.
 4. Wgraj plik `.aab` i wypełnij kartę sklepu. Gotowe teksty i odpowiedzi są w [`docs/store-listing.md`](docs/store-listing.md):

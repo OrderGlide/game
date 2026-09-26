@@ -1,10 +1,10 @@
 apply plugin: 'com.android.application'
 
 android {
-    namespace = "com.orderglide.stackisland"
+    namespace = "pl.jasior.frostcamp"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.orderglide.stackisland"
+        applicationId "pl.jasior.frostcamp"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // CI passes an increasing VERSION_CODE; Google Play rejects uploads that reuse one

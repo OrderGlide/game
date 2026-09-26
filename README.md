@@ -143,15 +143,18 @@ W Android Studio: **Run ▶** na telefonie/emulatorze.
 Gotowa polityka (PL + EN) jest w [`docs/privacy-policy.html`](docs/privacy-policy.html).
 Adres kontaktowy to alias przekierowujący na prywatną skrzynkę — można go wymienić w jednym miejscu w pliku.
 
-Google wymaga publicznego adresu URL. Wystawiamy ją przez **GitHub Pages**:
-Settings → Pages → Source: *Deploy from a branch*, gałąź `main`, folder `/docs`.
-Gdy repozytorium gry jest prywatne, te same dwa pliki leżą w osobnym publicznym repozytorium `coldvain`
-i to ono serwuje stronę — po zmianie polityki skopiuj `docs/index.html` i `docs/privacy-policy.html` także tam.
+Repozytorium gry jest prywatne, więc stronę serwuje osobne, publiczne repozytorium
+[`OrderGlide.github.io`](https://github.com/OrderGlide/OrderGlide.github.io):
 
-- Strona: https://orderglide.github.io/game/
-- Polityka (ten link idzie do Play Console): https://orderglide.github.io/game/privacy-policy.html
+| Adres | Do czego |
+|---|---|
+| https://orderglide.github.io/ | strona studia — podajemy ją w Play Console jako stronę dewelopera |
+| https://orderglide.github.io/privacy-policy.html | polityka prywatności — ten link idzie do Play Console |
+| https://orderglide.github.io/app-ads.txt | potwierdza dla AdMob, kto ma prawo sprzedawać reklamy w grze |
 
-Dla prywatnego repozytorium GitHub Pages wymaga płatnego planu; wtedy alternatywą są darmowe Google Sites.
+`app-ads.txt` działa wyłącznie w korzeniu domeny, dlatego strona nie może być w podkatalogu.
+
+Po zmianie polityki skopiuj `docs/privacy-policy.html` także do tamtego repozytorium.
 
 ### Ikona i splash
 

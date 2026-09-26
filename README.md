@@ -68,10 +68,12 @@ W przeglądarce zamiast reklamy pokazuje się oznaczona „Reklama testowa”, a
 
 ### Co musisz ustawić przed wydaniem
 
-1. **AdMob** ([admob.google.com](https://admob.google.com)): dodaj aplikację i utwórz 2 jednostki reklamowe: *Z nagrodą* i *Pełnoekranowa*.
-   - Wpisz swoje ID w `src/platform/config.ts` (`ADMOB`) i ID aplikacji w `android/app/src/main/AndroidManifest.xml`.
-   - Zostaw `testing: true`, dopóki testujesz. **Nigdy nie klikaj prawdziwych reklam we własnej grze**, bo Google blokuje za to konto.
+1. **AdMob** — konto i jednostki reklamowe są już utworzone, a ich ID wpisane w `src/platform/config.ts` (`ADMOB`)
+   oraz w `android/app/src/main/AndroidManifest.xml`.
+   - `testing: true` oznacza reklamy testowe. **Przełącz na `false` dopiero w wersji wysyłanej do Google Play.**
+     Kliknięcie prawdziwej reklamy we własnej grze kończy się trwałą blokadą konta AdMob.
    - W AdMob → Prywatność i wiadomości utwórz komunikat zgody RODO (GDPR).
+   - Plakietka „Wymaga sprawdzenia” przy aplikacji znika po opublikowaniu gry i powiązaniu jej ze sklepem.
 2. **Google Play Console** → Zarabianie → Produkty → Produkty w aplikacji: utwórz produkty o identyfikatorach
    `starter_pack`, `gems_small`, `gems_medium`, `gems_large`, `no_ads` i ustaw ceny.
    Ceny w grze wczytają się automatycznie ze sklepu.

@@ -1,13 +1,17 @@
-// Store and ad configuration. Replace the Google *test* IDs below with your own before release
-// (AdMob console → Apps → your app / Ad units; Play Console → Monetize → Products → In-app products).
+// Store and ad configuration.
+// Ad units live in the AdMob console (Apps → Frost Camp → Ad units); in-app products in
+// Play Console → Monetize → Products → In-app products.
 import type { Price, SkinId } from '../data';
 
 export const ADMOB = {
   /** Also set in android/app/src/main/AndroidManifest.xml (com.google.android.gms.ads.APPLICATION_ID). */
-  appId: 'ca-app-pub-3940256099942544~3347511713',
-  rewarded: 'ca-app-pub-3940256099942544/5224354917',
-  interstitial: 'ca-app-pub-3940256099942544/1033173712',
-  /** Keep true until your own ad units are approved — clicking real ads on your own device can get the account banned. */
+  appId: 'ca-app-pub-5511261754726756~8119818078',
+  rewarded: 'ca-app-pub-5511261754726756/7405502202',
+  interstitial: 'ca-app-pub-5511261754726756/3466257194',
+  /**
+   * Serves Google's test ads instead of real ones. Switch to false only in the build you upload to
+   * Google Play: tapping a real ad in your own game is what gets an AdMob account banned for good.
+   */
   testing: true,
 };
 

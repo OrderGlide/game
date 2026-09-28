@@ -6,14 +6,14 @@ import { Hud } from './view/hud';
 import { Music } from './music';
 import { setMuted, setVibration, unlockAudio } from './audio';
 import { T, fmt, setLang } from './i18n';
-import { initAds, isNative, showInterstitial, showRewarded } from './platform/ads';
+import { adStatus, initAds, isNative, showInterstitial, showRewarded } from './platform/ads';
 import { billingAvailable, loadPrices, ownedProducts, priceOf, purchase } from './platform/billing';
 import { INTERSTITIAL } from './platform/config';
 import { playIntro } from './intro';
 import { enemyName } from './view/hud';
 
 const SAVE_KEY = 'frost-camp-save-v3';
-const VERSION = '0.6.0';
+const VERSION = '0.6.1';
 
 interface SaveFile { v: 3; profile: ProfileData; camp: CampSave | null; }
 
@@ -57,6 +57,7 @@ function save(): void {
 
 hud.svc = {
   showRewarded,
+  adStatus,
   purchase,
   priceOf,
   billingAvailable,

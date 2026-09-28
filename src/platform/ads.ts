@@ -10,34 +10,90 @@ let initialized = false;
 let rewardedReady = false;
 let interstitialReady = false;
 let showing = false;
+/** Last AdMob problem, shown in Settings so a failing ad can be diagnosed on the phone. */
+let lastError = '';
+const retryDelay = { rewarded: 30, interstitial: 30 };
+const retrying = { rewarded: false, interstitial: false };
+const loading = { rewarded: false, interstitial: false };
+
+function describe(e: unknown): string {
+  const o = (e ?? {}) as { code?: number | string; message?: string; errorMessage?: string };
+  const code = o.code ?? '';
+  // AdMob load error codes: 0 internal, 1 invalid request, 2 network, 3 no fill (no ad for now)
+  const hint = { 0: 'internal', 1: 'invalid request', 2: 'network', 3: 'no fill' }[Number(code)] ?? '';
+  return [code !== '' ? `#${code}` : '', hint, o.message ?? o.errorMessage ?? (typeof e === 'string' ? e : '')]
+    .filter(Boolean).join(' ').slice(0, 120);
+}
 
 export async function initAds(): Promise<void> {
   if (!isNative || initialized) return;
   try {
     await AdMob.initialize({ initializeForTesting: ADMOB.testing });
-    // EU/UK users must see Google's consent form before personalised ads
+    initialized = true;
+  } catch (e) {
+    lastError = `init: ${describe(e)}`;
+    console.warn('AdMob init failed', e);
+    return;
+  }
+  // EU/UK users must see Google's consent form before personalised ads. Its own try: a missing
+  // consent message in the AdMob console must not stop the ads from loading.
+  try {
     const info = await AdMob.requestConsentInfo();
     if (info.isConsentFormAvailable && info.status === AdmobConsentStatus.REQUIRED) await AdMob.showConsentForm();
-    initialized = true;
-    void preloadRewarded();
-    void preloadInterstitial();
   } catch (e) {
-    console.warn('AdMob init failed', e);
+    lastError = `consent: ${describe(e)}`;
+    console.warn('AdMob consent failed', e);
   }
+  void preloadRewarded();
+  void preloadInterstitial();
+}
+
+/** After a failed load try again later, waiting longer each time (30 s up to 5 min). */
+function retry(kind: 'rewarded' | 'interstitial', load: () => Promise<void>): void {
+  if (retrying[kind]) return;
+  retrying[kind] = true;
+  const d = retryDelay[kind];
+  retryDelay[kind] = Math.min(d * 2, 300);
+  setTimeout(() => { retrying[kind] = false; void load(); }, d * 1000);
 }
 
 async function preloadRewarded(): Promise<void> {
+  if (loading.rewarded) return;
+  loading.rewarded = true;
   try {
     await AdMob.prepareRewardVideoAd({ adId: ADMOB.rewarded, isTesting: ADMOB.testing });
     rewardedReady = true;
-  } catch { rewardedReady = false; }
+    retryDelay.rewarded = 30;
+  } catch (e) {
+    rewardedReady = false;
+    lastError = `rewarded: ${describe(e)}`;
+    retry('rewarded', preloadRewarded);
+  } finally {
+    loading.rewarded = false;
+  }
 }
 
 async function preloadInterstitial(): Promise<void> {
+  if (loading.interstitial) return;
+  loading.interstitial = true;
   try {
     await AdMob.prepareInterstitial({ adId: ADMOB.interstitial, isTesting: ADMOB.testing });
     interstitialReady = true;
-  } catch { interstitialReady = false; }
+    retryDelay.interstitial = 30;
+  } catch (e) {
+    interstitialReady = false;
+    lastError = `interstitial: ${describe(e)}`;
+    retry('interstitial', preloadInterstitial);
+  } finally {
+    loading.interstitial = false;
+  }
+}
+
+/** One line for Settings: whether ads are loaded, and the last error if any. */
+export function adStatus(): string {
+  if (!isNative) return 'web (test)';
+  const state = `${ADMOB.testing ? 'TEST ' : ''}${initialized ? 'ok' : 'off'} · R ${rewardedReady ? '✓' : '…'} · I ${interstitialReady ? '✓' : '…'}`;
+  return lastError ? `${state} · ${lastError}` : state;
 }
 
 /** Shows a rewarded ad; resolves true only if the player earned the reward. */
@@ -53,7 +109,8 @@ export async function showRewarded(): Promise<boolean> {
     const reward = await AdMob.showRewardVideoAd();
     void preloadRewarded();
     return !!reward;
-  } catch {
+  } catch (e) {
+    lastError = `show: ${describe(e)}`;
     void preloadRewarded();
     return false;
   } finally {
@@ -69,7 +126,9 @@ export async function showInterstitial(): Promise<void> {
     if (!interstitialReady) return;
     interstitialReady = false;
     await AdMob.showInterstitial();
-  } catch { /* no fill — just skip */ } finally {
+  } catch (e) {
+    lastError = `show: ${describe(e)}`;
+  } finally {
     showing = false;
     if (isNative) void preloadInterstitial();
   }

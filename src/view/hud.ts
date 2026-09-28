@@ -157,6 +157,8 @@ type ShopTab = 'gems' | 'skins' | 'pets' | 'boosts' | 'chests';
 /** Platform hooks the menus call into (ads, store, settings), provided by main. */
 export interface HudServices {
   showRewarded(): Promise<boolean>;
+  /** Ad loading state and last AdMob error, shown in Settings. */
+  adStatus(): string;
   purchase(id: ProductId): Promise<boolean>;
   restore(): Promise<void>;
   priceOf(id: ProductId): string;
@@ -191,6 +193,8 @@ export class Hud {
   private last: Record<string, string> = {};
   private v = new THREE.Vector3();
   private panel: Panel = null;
+  /** Shown in the open menu after a rewarded ad could not play. */
+  private adMsg = '';
   private shopTab: ShopTab = 'gems';
   private panelKey = '';
   private forgeCooldown = 0;
@@ -342,6 +346,7 @@ export class Hud {
     this.busy = true;
     try {
       if (await this.svc.showRewarded()) reward();
+      else this.adMsg = T.adUnavailable;
     } finally {
       this.busy = false;
       this.renderPanel();
@@ -354,6 +359,7 @@ export class Hud {
 
   private open(p: Exclude<Panel, null>): void {
     this.panel = p;
+    this.adMsg = '';
     this.els.overlay.classList.add('open');
     this.renderPanel();
   }
@@ -558,7 +564,8 @@ export class Hud {
         ${row(T.sQuality, 'quality', T.quality[st.quality])}${row(T.sFps, 'fps', onOff(st.fps))}
         ${row(T.sLang, 'lang', st.lang === 'auto' ? T.quality.auto : st.lang.toUpperCase())}
         <button class="btn danger" data-act="reset">${this.resetArmed ? T.resetConfirm : T.reset}</button>
-        <div class="note">${T.version} ${this.svc?.version ?? ''}</div></div>`;
+        <div class="note">${T.version} ${this.svc?.version ?? ''}</div>
+        <div class="note">${T.adsLabel}: ${this.svc?.adStatus() ?? ''}</div></div>`;
     } else if (this.panel === 'offline') {
       html = head(`🌙 ${T.offlineTitle}`, false) + `<div class="big"><div class="note">${T.offlineText}</div>
         <h3>+$${formatNum(this.offlineAmount)}</h3>
@@ -572,6 +579,7 @@ export class Hud {
         <h3>${T.world[g.world.def.id]} ✓</h3>${tierUp}
         <button class="btn gold" data-act="travel">${fmt(T.travel, { w: T.world[next] })}</button></div>`;
     }
+    if (this.adMsg && html) html += `<div class="note" style="color:#ffb74d">⚠️ ${this.adMsg}</div>`;
     this.els.panel.innerHTML = html;
     this.panelKey = this.stateKey();
   }
@@ -581,7 +589,7 @@ export class Hud {
     const g = this.game;
     if (!g) return '';
     const p = g.profile;
-    return [this.panel, this.shopTab, this.resetArmed, JSON.stringify(p.settings), p.pet, p.pets.length, p.owned.length, p.dailyDoubled,
+    return [this.panel, this.adMsg, this.panel === 'settings' ? this.svc?.adStatus() : '', this.shopTab, this.resetArmed, JSON.stringify(p.settings), p.pet, p.pets.length, p.owned.length, p.dailyDoubled,
       Math.ceil(g.adWait('cash')), Math.ceil(g.adWait('speed')), Math.ceil(g.adWait('chop')), g.adReady('chest'), Math.floor(g.money), JSON.stringify(p.gems), JSON.stringify(p.levels), p.skin, p.skins.length,
       Math.ceil(g.boostLeft('cash')), Math.ceil(g.boostLeft('speed')), Math.ceil(g.boostLeft('chop')),
       Math.ceil((p.freeChestAt - g.now()) / 1000), p.daily.last, JSON.stringify(p.quests.list.map((q) => [q.progress, q.claimed]))].join('|');
